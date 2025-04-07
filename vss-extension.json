@@ -1,0 +1,237 @@
+{
+  "manifestVersion": 1,
+  "id": "fo-ai-assistant-multi",
+  "publisher": "zaltunka",
+  "version": "1.5.0",
+  "name": "Fo AI Assistant Multi Model",
+  "description": "AI-powered assistant for Azure Boards work items with expert software development analysis. Developed by Ford Otosan - Founited team",
+  "categories": [
+    "Azure Boards"
+  ],
+  "targets": [
+    {
+      "id": "Microsoft.VisualStudio.Services"
+    }
+  ],
+  "icons": {
+    "default": "img/extension-icon.png"
+  },
+  "content": {
+    "details": {
+      "path": "README.md"
+    }
+  },
+  "files": [
+    {
+      "path": "dist",
+      "addressable": true
+    },
+    {
+      "path": "img",
+      "addressable": true
+    }
+  ],
+  "contributions": [
+    {
+      "id": "ai-assistant-work-item-form-page",
+      "type": "ms.vss-work-web.work-item-form-page",
+      "description": "Fo Assistant for work items",
+      "targets": [
+        "ms.vss-work-web.work-item-form"
+      ],
+      "properties": {
+        "name": "Fo AI Assistant",
+        "uri": "dist/index.html",
+        "height": 400,
+        "order": 20
+      }
+    },
+    {
+      "id": "ai-bot-work-item-form-page",
+      "type": "ms.vss-work-web.work-item-form-page",
+      "description": "AI Bot for work items",
+      "targets": [
+        "ms.vss-work-web.work-item-form"
+      ],
+      "properties": {
+        "name": "AI Bot",
+        "uri": "dist/aibot.html",
+        "height": 400,
+        "order": 25
+      }
+    },
+    {
+      "id": "ai-assistant-chat-tab",
+      "type": "ms.vss-web.hub",
+      "description": "AI Chat Assistant",
+      "targets": [
+        "ms.vss-work-web.work-hub-group"
+      ],
+      "properties": {
+        "name": "AI Chat",
+        "uri": "dist/chat.html",
+        "height": 600,
+        "order": 30
+      }
+    },
+    {
+      "id": "ai-assistant-settings-hub",
+      "type": "ms.vss-web.hub",
+      "description": "Settings for Fo AI Assistant",
+      "targets": [
+        "ms.vss-web.project-admin-hub-group"
+      ],
+      "properties": {
+        "name": "Fo AI Assistant Settings",
+        "order": 99,
+        "uri": "dist/settings.html"
+      }
+    },
+    {
+      "id": "board-chat-panel",
+      "type": "ms.vss-work-web.board-view-menu",
+      "description": "AI Chat Assistant Panel",
+      "targets": [
+        "ms.vss-work-web.board-view-menu-item"
+      ],
+      "properties": {
+        "name": "AI Chat",
+        "uri": "dist/boardChat.html",
+        "height": 600,
+        "width": 400,
+        "title": "AI Chat Assistant"
+      }
+    },
+    {
+      "id": "board-chat-toolbar",
+      "type": "ms.vss-web.action",
+      "description": "AI Chat Assistant Panel",
+      "targets": [
+        "ms.vss-work-web.work-item-board-toolbar-menu",
+        "ms.vss-work-web.work-item-board-pivot-filter-menu"
+      ],
+      "properties": {
+        "text": "AI Chat",
+        "title": "AI Chat Assistant",
+        "icon": "img/extension-icon.png",
+        "uri": "dist/boardChat.html",
+        "registeredObjectId": "board-chat-object",
+        "height": 600,
+        "width": 400
+      }
+    },
+    {
+      "id": "board-chat-context-menu",
+      "type": "ms.vss-web.action-provider",
+      "description": "AI Chat Assistant in Board Context Menu",
+      "targets": [
+        "ms.vss-work-web.work-item-context-menu"
+      ],
+      "properties": {
+        "name": "AI Chat",
+        "registeredObjectId": "board-chat-context-menu",
+        "uri": "dist/boardChat.html",
+        "icon": {
+          "light": "img/extension-icon.png",
+          "dark": "img/extension-icon.png"
+        },
+        "text": "AI Chat",
+        "title": "AI Chat Assistant",
+        "group": "actions",
+        "height": 600,
+        "width": 400
+      }
+    },
+    {
+      "id": "board-chat-backlog-menu",
+      "type": "ms.vss-web.action",
+      "description": "AI Chat Assistant in Board Menu",
+      "targets": [
+        "ms.vss-work-web.backlog-board-actions"
+      ],
+      "properties": {
+        "text": "AI Chat",
+        "title": "AI Chat Assistant",
+        "icon": "img/extension-icon.png",
+        "uri": "dist/boardChat.html",
+        "registeredObjectId": "board-chat-backlog",
+        "height": 600,
+        "width": 400
+      }
+    }
+  ],
+  "scopes": [
+    "vso.work",
+    "vso.work_write"
+  ],
+  "contentSecurityPolicy": {
+    "default-src": [
+      "'self'",
+      "https://*.visualstudio.com",
+      "https://*.dev.azure.com",
+      "https://*.vsassets.io",
+      "https://*.vsblob.visualstudio.com",
+      "https://*.azure.com",
+      "https://*.microsoftonline.com",
+      "https://*.live.com",
+      "https://*.msauth.net",
+      "https://*.msftauth.net"
+    ],
+    "script-src": [
+      "'self'",
+      "'unsafe-eval'",
+      "'unsafe-inline'",
+      "https://*.visualstudio.com",
+      "https://*.vsassets.io",
+      "https://*.dev.azure.com",
+      "https://*.microsoftonline.com",
+      "https://*.msauth.net",
+      "https://*.msftauth.net",
+      "https://*.live.com"
+    ],
+    "style-src": [
+      "'self'",
+      "'unsafe-inline'",
+      "https://*.visualstudio.com",
+      "https://*.vsassets.io",
+      "https://*.dev.azure.com"
+    ],
+    "img-src": [
+      "'self'",
+      "data:",
+      "blob:",
+      "https://*.visualstudio.com",
+      "https://*.vsassets.io",
+      "https://*.dev.azure.com",
+      "https://*.microsoftonline.com",
+      "https://*.msauth.net",
+      "https://*.msftauth.net"
+    ],
+    "connect-src": [
+      "'self'",
+      "https://*.openai.azure.com",
+      "https://*.visualstudio.com",
+      "https://*.dev.azure.com",
+      "https://*.vsassets.io",
+      "https://*.vsblob.visualstudio.com",
+      "https://*.microsoftonline.com",
+      "https://*.msauth.net",
+      "https://*.msftauth.net",
+      "https://*.live.com"
+    ],
+    "frame-src": [
+      "'self'",
+      "https://*.visualstudio.com",
+      "https://*.dev.azure.com",
+      "https://*.microsoftonline.com",
+      "https://*.msauth.net",
+      "https://*.msftauth.net",
+      "https://*.live.com"
+    ],
+    "frame-ancestors": [
+      "'self'",
+      "https://*.visualstudio.com",
+      "https://*.dev.azure.com"
+    ]
+  }
+}
