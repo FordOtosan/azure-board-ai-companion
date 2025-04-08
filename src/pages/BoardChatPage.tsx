@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
+import { Box, CircularProgress, Typography, Container } from '@mui/material';
 import { BoardChatHeader } from '../features/boardChat/components/BoardChatHeader';
 import { BoardChatWelcomeCard } from '../features/boardChat/components/BoardChatWelcomeCard';
 import '../features/boardChat/styles/boardChat.css';
@@ -24,20 +25,29 @@ const BoardChatPage: React.FC = () => {
   }, []);
 
   if (error) {
-    return <div className="boardChat-error">{error}</div>;
+    return (
+      <Box className="boardChat-error" p={3}>
+        <Typography color="error">{error}</Typography>
+      </Box>
+    );
   }
 
   if (!initialized) {
-    return <div className="boardChat-loading">Loading...</div>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" p={3}>
+        <CircularProgress />
+        <Typography ml={2}>Loading...</Typography>
+      </Box>
+    );
   }
 
   return (
-    <div className="boardChat-container">
+    <Box className="boardChat-container" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <BoardChatHeader />
-      <div className="boardChat-content">
+      <Container className="boardChat-content" sx={{ flex: 1, py: 3 }}>
         <BoardChatWelcomeCard />
-      </div>
-    </div>
+      </Container>
+    </Box>
   );
 };
 

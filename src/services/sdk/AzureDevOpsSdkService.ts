@@ -1,4 +1,5 @@
 import * as SDK from "azure-devops-extension-sdk";
+import { CommonServiceIds, IExtensionDataService } from "azure-devops-extension-api";
 
 /**
  * Service to handle Azure DevOps SDK initialization
@@ -39,6 +40,14 @@ export class AzureDevOpsSdkService {
   public static async getAccessToken(): Promise<string> {
     await this.ensureInitialized();
     return SDK.getAccessToken();
+  }
+
+  /**
+   * Get the extension data service for storing extension data
+   */
+  public static async getExtensionDataService(): Promise<IExtensionDataService> {
+    await this.ensureInitialized();
+    return await SDK.getService<IExtensionDataService>(CommonServiceIds.ExtensionDataService);
   }
 
   /**

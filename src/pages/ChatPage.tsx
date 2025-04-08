@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
+import { Box, CircularProgress, Typography, Container } from '@mui/material';
 import { ChatHeader } from '../features/chat/components/ChatHeader';
 import { ChatWelcomeCard } from '../features/chat/components/ChatWelcomeCard';
 import '../features/chat/styles/chat.css';
@@ -24,20 +25,29 @@ const ChatPage: React.FC = () => {
   }, []);
 
   if (error) {
-    return <div className="chat-error">{error}</div>;
+    return (
+      <Box className="chat-error" p={3}>
+        <Typography color="error">{error}</Typography>
+      </Box>
+    );
   }
 
   if (!initialized) {
-    return <div className="chat-loading">Loading...</div>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" p={3}>
+        <CircularProgress />
+        <Typography ml={2}>Loading...</Typography>
+      </Box>
+    );
   }
 
   return (
-    <div className="chat-container">
+    <Box className="chat-container" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <ChatHeader />
-      <div className="chat-content">
+      <Container className="chat-content" sx={{ flex: 1, py: 3 }}>
         <ChatWelcomeCard />
-      </div>
-    </div>
+      </Container>
+    </Box>
   );
 };
 

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
+import { Box, CircularProgress, Typography, Container } from '@mui/material';
 import { AiBotHeader } from '../features/aiBot/components/AiBotHeader';
 import { AiBotWelcomeCard } from '../features/aiBot/components/AiBotWelcomeCard';
 import '../features/aiBot/styles/aiBot.css';
@@ -24,20 +25,29 @@ const AiBotPage: React.FC = () => {
   }, []);
 
   if (error) {
-    return <div className="aiBot-error">{error}</div>;
+    return (
+      <Box className="aiBot-error" p={3}>
+        <Typography color="error">{error}</Typography>
+      </Box>
+    );
   }
 
   if (!initialized) {
-    return <div className="aiBot-loading">Loading...</div>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" p={3}>
+        <CircularProgress />
+        <Typography ml={2}>Loading...</Typography>
+      </Box>
+    );
   }
 
   return (
-    <div className="aiBot-container">
+    <Box className="aiBot-container" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <AiBotHeader />
-      <div className="aiBot-content">
+      <Container className="aiBot-content" sx={{ flex: 1, py: 3 }}>
         <AiBotWelcomeCard />
-      </div>
-    </div>
+      </Container>
+    </Box>
   );
 };
 

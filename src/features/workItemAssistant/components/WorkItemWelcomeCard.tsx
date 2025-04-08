@@ -1,13 +1,20 @@
 import * as React from 'react';
+import { Paper, Typography, Box } from '@mui/material';
+import { LlmSettingsDisplay } from '../../../components/LlmSettingsDisplay';
 import '../styles/workItemAssistant.css';
 
 export const WorkItemWelcomeCard: React.FC = () => {
   return (
-    <div className="workItemAssistant-card">
-      <h2 className="workItemAssistant-title">Welcome to Work Item AI Assistant</h2>
-      <p className="workItemAssistant-text">
-        This extension provides AI-powered analysis and assistance for your work items.
-      </p>
-    </div>
+    <Paper elevation={3} className="workItemAssistant-card">
+      <Box p={3}>
+        <Typography variant="h5" component="h2" gutterBottom>
+          Welcome to Work Item AI Assistant
+        </Typography>
+        <Typography variant="body1" paragraph>
+          This extension provides AI-powered analysis and assistance for your work items.
+        </Typography>
+        <LlmSettingsDisplay />
+      </Box>
+    </Paper>
   );
 };

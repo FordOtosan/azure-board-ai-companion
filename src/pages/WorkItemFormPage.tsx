@@ -1,5 +1,6 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
+import { Box, CircularProgress, Typography, Container } from '@mui/material';
 import { WorkItemHeader } from '../features/workItemAssistant/components/WorkItemHeader';
 import { WorkItemWelcomeCard } from '../features/workItemAssistant/components/WorkItemWelcomeCard';
 import '../features/workItemAssistant/styles/workItemAssistant.css';
@@ -24,20 +25,29 @@ const WorkItemFormPage: React.FC = () => {
   }, []);
 
   if (error) {
-    return <div className="workItemAssistant-error">{error}</div>;
+    return (
+      <Box className="workItemAssistant-error" p={3}>
+        <Typography color="error">{error}</Typography>
+      </Box>
+    );
   }
 
   if (!initialized) {
-    return <div className="workItemAssistant-loading">Loading...</div>;
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" p={3}>
+        <CircularProgress />
+        <Typography ml={2}>Loading...</Typography>
+      </Box>
+    );
   }
 
   return (
-    <div className="workItemAssistant-container">
+    <Box className="workItemAssistant-container" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <WorkItemHeader />
-      <div className="workItemAssistant-content">
+      <Container className="workItemAssistant-content" sx={{ flex: 1, py: 3 }}>
         <WorkItemWelcomeCard />
-      </div>
-    </div>
+      </Container>
+    </Box>
   );
 };
 
