@@ -5,12 +5,10 @@ import { BoardPromptsTab } from '../features/settings/components/BoardPromptsTab
 import { LlmSettingsTab } from '../features/settings/components/LlmSettingsTab';
 import { SettingsHeader } from '../features/settings/components/SettingsHeader';
 import { SettingsTab, TabNav } from '../features/settings/components/TabNav';
+import { WorkItemSettingsTab } from '../features/settings/components/WorkItemSettingsTab';
 import '../features/settings/styles/settings.css';
 import { AzureDevOpsSdkService } from '../services/sdk/AzureDevOpsSdkService';
 import { Language } from '../translations';
-
-// Lazy load the WorkItemSettingsTab
-const WorkItemSettingsTab = React.lazy(() => import('../features/settings/components/WorkItemSettingsTab'));
 
 // Define translations for the component
 const settingsPageTranslations = {
@@ -65,11 +63,7 @@ const SettingsPage: React.FC = () => {
       case 'assistant':
         return <AssistantPromptsTab currentLanguage={currentLanguage} />;
       case 'workItemSettings':
-        return (
-          <React.Suspense fallback={<div>{T.loading}</div>}>
-            <WorkItemSettingsTab currentLanguage={currentLanguage} />
-          </React.Suspense>
-        );
+        return <WorkItemSettingsTab currentLanguage={currentLanguage} />;
       default:
         return <LlmSettingsTab currentLanguage={currentLanguage} />;
     }

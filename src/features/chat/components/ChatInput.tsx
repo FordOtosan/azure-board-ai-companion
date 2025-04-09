@@ -2,6 +2,7 @@ import { Send, Stop } from '@mui/icons-material';
 import { Box, Button, Chip, IconButton, Popover, TextField, Tooltip, Typography } from '@mui/material';
 import { WebApiTeam } from 'azure-devops-extension-api/Core';
 import * as React from 'react';
+import { LlmConfig } from '../../../features/settings/services/LlmSettingsService';
 
 // --- Add translations specifically for this component ---
 // (Could also be passed down as props or use a context if translations grow large)
@@ -14,7 +15,9 @@ const inputTranslations = {
     yes: "Yes",
     no: "No",
     stopGeneration: "Stop generation",
-    sendMessage: "Send message"
+    sendMessage: "Send message",
+    typeMessage: "Type your message...",
+    typeMessageWithLlm: "Type your message with {llm}..."
   },
   tr: {
     placeholderTeam: "Takım için mesajınızı yazın...",
@@ -24,7 +27,9 @@ const inputTranslations = {
     yes: "Evet",
     no: "Hayır",
     stopGeneration: "Üretimi durdur",
-    sendMessage: "Mesaj gönder"
+    sendMessage: "Mesaj gönder",
+    typeMessage: "Mesajınızı yazın...",
+    typeMessageWithLlm: "{llm} ile ilgili mesajınızı yazın..."
   }
 };
 
@@ -38,6 +43,7 @@ interface ChatInputProps {
   currentLanguage: Language;
   onChangeTeamRequest: () => void;
   onStopGeneration?: () => void; // Add new prop for stopping generation
+  selectedLlm: LlmConfig | null;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({ 
@@ -46,7 +52,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   isLoading, 
   currentLanguage, 
   onChangeTeamRequest,
-  onStopGeneration 
+  onStopGeneration,
+  selectedLlm
 }) => {
   const [prompt, setPrompt] = React.useState('');
   const [confirmationAnchorEl, setConfirmationAnchorEl] = React.useState<HTMLElement | null>(null);
@@ -91,6 +98,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const openConfirmation = Boolean(confirmationAnchorEl);
   const confirmationId = openConfirmation ? 'change-team-popover' : undefined;
 
+  const placeholder = selectedLlm 
+    ? T.typeMessageWithLlm.replace('{llm}', selectedLlm.name || '')
+    : T.typeMessage;
+
   return (
     <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', mt: 'auto', background: '#f5f5f5' }}>
       {selectedTeam && (
@@ -134,13 +145,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           fullWidth
           variant="outlined"
           size="small"
-          placeholder={`${placeholderText} ${T.shiftEnterHint}`}
+          placeholder={placeholder}
           multiline
           maxRows={5}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           onKeyPress={handleKeyPress}
-          disabled={isLoading && !onStopGeneration} // Only disable if loading and no stop handler
+          disabled={isLoading && !onStopGeneration}
         />
         <Tooltip title={isLoading ? T.stopGeneration : T.sendMessage}>
           <IconButton 

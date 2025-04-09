@@ -1,7 +1,8 @@
+import { Box, Paper, Skeleton, Typography } from '@mui/material';
 import * as React from 'react';
-import { Box, Typography, Paper, Skeleton } from '@mui/material';
-import '../styles/settings.css';
+import { LlmProvider } from '../../../types/llm';
 import { LlmSettings, LlmSettingsService } from '../services/LlmSettingsService';
+import '../styles/settings.css';
 
 export const SettingsWelcomeCard: React.FC = () => {
   const [settings, setSettings] = React.useState<LlmSettings | null>(null);
@@ -22,7 +23,7 @@ export const SettingsWelcomeCard: React.FC = () => {
     loadSettings();
   }, []);
 
-  const getProviderName = (provider: LlmSettings['provider'] | undefined) => {
+  const getProviderName = (provider: LlmProvider) => {
     switch (provider) {
       case 'azure-openai':
         return 'Azure OpenAI Services';
@@ -34,6 +35,8 @@ export const SettingsWelcomeCard: React.FC = () => {
         return 'Not configured';
     }
   };
+
+  const defaultConfig = settings?.configurations.find(config => config.isDefault) || settings?.configurations[0];
 
   return (
     <Paper elevation={3} className="settings-card">
@@ -58,16 +61,16 @@ export const SettingsWelcomeCard: React.FC = () => {
         ) : (
           <>
             <Typography variant="subtitle1" gutterBottom>
-              <strong>LLM Provider:</strong> {getProviderName(settings?.provider)}
+              <strong>LLM Provider:</strong> {defaultConfig ? getProviderName(defaultConfig.provider) : 'Not configured'}
             </Typography>
             
-            {settings?.provider && (
+            {defaultConfig && (
               <>
                 <Typography variant="body2" gutterBottom>
-                  <strong>Temperature:</strong> {settings.temperature.toFixed(1)}
+                  <strong>Temperature:</strong> {defaultConfig.temperature.toFixed(1)}
                 </Typography>
                 <Typography variant="body2" gutterBottom>
-                  <strong>Cost per Million Tokens:</strong> ${settings.costPerMillionTokens.toFixed(2)}
+                  <strong>Cost per Million Tokens:</strong> ${defaultConfig.costPerMillionTokens.toFixed(2)}
                 </Typography>
               </>
             )}

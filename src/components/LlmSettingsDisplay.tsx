@@ -1,6 +1,7 @@
+import { Box, Skeleton, Typography } from '@mui/material';
 import * as React from 'react';
-import { Box, Typography, Skeleton } from '@mui/material';
 import { LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService';
+import { LlmProvider } from '../types/llm';
 
 export const LlmSettingsDisplay: React.FC = () => {
   const [settings, setSettings] = React.useState<LlmSettings | null>(null);
@@ -21,7 +22,7 @@ export const LlmSettingsDisplay: React.FC = () => {
     loadSettings();
   }, []);
 
-  const getProviderName = (provider: LlmSettings['provider'] | undefined) => {
+  const getProviderName = (provider: LlmProvider) => {
     switch (provider) {
       case 'azure-openai':
         return 'Azure OpenAI Services';
@@ -43,7 +44,9 @@ export const LlmSettingsDisplay: React.FC = () => {
     );
   }
 
-  if (!settings?.provider) {
+  const defaultConfig = settings?.configurations.find(config => config.isDefault) || settings?.configurations[0];
+
+  if (!defaultConfig) {
     return (
       <Box sx={{ mb: 2 }}>
         <Typography color="error">
@@ -56,10 +59,10 @@ export const LlmSettingsDisplay: React.FC = () => {
   return (
     <Box sx={{ mb: 2 }}>
       <Typography variant="body2" gutterBottom>
-        <strong>AI Service:</strong> {getProviderName(settings.provider)}
+        <strong>AI Service:</strong> {getProviderName(defaultConfig.provider)}
       </Typography>
       <Typography variant="body2" color="textSecondary" sx={{ fontSize: '0.875rem' }}>
-        Temperature: {settings.temperature.toFixed(1)}
+        Temperature: {defaultConfig.temperature.toFixed(1)}
       </Typography>
     </Box>
   );

@@ -12,7 +12,8 @@ const llmTestChatTranslations = {
     sending: "Sending...",
     errorPrefix: "Error:",
     unexpectedError: "An unexpected error occurred.",
-    apiCallError: "An unexpected error occurred during the API call."
+    apiCallError: "An unexpected error occurred during the API call.",
+    noConfigError: "No LLM configuration available. Please configure one in the settings."
   },
   tr: {
     title: "LLM Entegrasyonunu Test Et",
@@ -21,7 +22,8 @@ const llmTestChatTranslations = {
     sending: "Gönderiliyor...",
     errorPrefix: "Hata:",
     unexpectedError: "Beklenmeyen bir hata oluştu.",
-    apiCallError: "API çağrısı sırasında beklenmeyen bir hata oluştu."
+    apiCallError: "API çağrısı sırasında beklenmeyen bir hata oluştu.",
+    noConfigError: "LLM yapılandırması mevcut değil. Lütfen ayarlarda bir yapılandırma ekleyin."
   }
 };
 
@@ -37,42 +39,40 @@ interface Message {
 
 // Function to make the actual API call
 const sendTestPrompt = async (settings: LlmSettings, prompt: string): Promise<string> => {
-  console.log('Sending real test prompt:', { provider: settings.provider, prompt });
+  console.log('Sending real test prompt:', prompt);
 
-  if (!settings.provider || !settings.apiUrl || !settings.apiToken) {
+  const config = settings.configurations.find(c => c.isDefault) || settings.configurations[0];
+  if (!config) {
+    return "Error: No LLM configuration available.";
+  }
+
+  if (!config.provider || !config.apiUrl || !config.apiToken) {
     return "Error: LLM provider, API URL, or API Token not configured correctly.";
   }
 
-  let requestUrl = settings.apiUrl;
+  let requestUrl = config.apiUrl;
   let requestBody: any;
   const headers: HeadersInit = {
     'Content-Type': 'application/json',
   };
 
   try {
-    if (settings.provider === 'azure-openai' || settings.provider === 'openai') {
-      // Assuming Azure OpenAI URL includes deployment name: https://<resource-name>.openai.azure.com/openai/deployments/<deployment-name>/chat/completions?api-version=<api-version>
-      // Assuming OpenAI URL is like: https://api.openai.com/v1/chat/completions
-      // Standard OpenAI chat completions format
+    if (config.provider === 'azure-openai' || config.provider === 'openai') {
       requestBody = JSON.stringify({
         messages: [{ role: 'user', content: prompt }],
-        temperature: settings.temperature ?? 0.7,
-        // max_tokens: 150 // Optional: Add max_tokens if desired
+        temperature: config.temperature ?? 0.7,
       });
       
-      if (settings.provider === 'azure-openai') {
-          headers['api-key'] = settings.apiToken;
-          // Ensure API version is appended if not present in the base URL provided by user
+      if (config.provider === 'azure-openai') {
+          headers['api-key'] = config.apiToken;
           if (!requestUrl.includes('api-version=')) {
-              // Attempt to add a common default version, user might need to adjust URL
               const separator = requestUrl.includes('?') ? '&' : '?';
               requestUrl += `${separator}api-version=2023-07-01-preview`; 
-              console.warn("Azure OpenAI API version not found in URL, appending default. Please ensure your API URL is correct including the deployment name and api-version.");
+              console.warn("Azure OpenAI API version not found in URL, appending default.");
           }
       } else { // openai
-          headers['Authorization'] = `Bearer ${settings.apiToken}`;
-          // Append /v1/chat/completions if user provided base URL only
-           if (!requestUrl.endsWith('/v1/chat/completions')) {
+          headers['Authorization'] = `Bearer ${config.apiToken}`;
+          if (!requestUrl.endsWith('/v1/chat/completions')) {
                if (!requestUrl.endsWith('/')) {
                    requestUrl += '/';
                }
@@ -80,48 +80,34 @@ const sendTestPrompt = async (settings: LlmSettings, prompt: string): Promise<st
            }
       }
 
-    } else if (settings.provider === 'gemini') {
-        // Gemini API endpoint structure: https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=YOUR_API_KEY
-        // Note: Gemini uses API Key in query param, not Bearer token usually. 
-        // Adjusting based on typical Gemini API structure. User might need to provide URL with model.
-        
-        headers['x-goog-api-key'] = settings.apiToken; // More common for Google APIs via SDK/direct call
+    } else if (config.provider === 'gemini') {
+        headers['x-goog-api-key'] = config.apiToken;
 
-         // Ensure the URL ends with :generateContent and includes the key param
          if (!requestUrl.includes(':generateContent')) {
              if (!requestUrl.endsWith('/')) {
                  requestUrl += '/';
              }
-             // Assuming gemini-pro model if not specified in URL. User should provide full URL ideally.
              if (!requestUrl.includes('/models/')) {
                  requestUrl += 'v1beta/models/gemini-pro:generateContent'; 
-                 console.warn("Gemini model not found in URL, assuming 'gemini-pro'. Please ensure your API URL is correct.");
+                 console.warn("Gemini model not found in URL, assuming 'gemini-pro'.");
              } else if (!requestUrl.includes(':generateContent')) {
-                 // If model is there but not the action
                  requestUrl += ':generateContent';
              }
          }
-         // Append key if not already in URL (less common for Google, usually header)
-         // if (!requestUrl.includes('key=')) {
-         //     const separator = requestUrl.includes('?') ? '&' : '?';
-         //     requestUrl += `${separator}key=${settings.apiToken}`;
-         // }
 
       requestBody = JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
         generationConfig: {
-          temperature: settings.temperature ?? 0.7,
-          // candidateCount: 1 // Optional
+          temperature: config.temperature ?? 0.7,
         }
       });
 
     } else {
-      return `Error: Unsupported provider "${settings.provider}" selected.`;
+      return `Error: Unsupported provider "${config.provider}" selected.`;
     }
 
     console.log(`Making request to: ${requestUrl}`);
-    console.log(`With headers: ${JSON.stringify({...headers, [settings.provider === 'azure-openai' ? 'api-key' : 'Authorization']: '***'} , null, 2)}`); // Mask token in log
-    // console.log(`With body: ${requestBody}`); // Be careful logging request body if it contains sensitive info beyond prompt
+    console.log(`With headers: ${JSON.stringify({...headers, [config.provider === 'azure-openai' ? 'api-key' : 'Authorization']: '***'} , null, 2)}`);
 
     const response = await fetch(requestUrl, {
       method: 'POST',
@@ -138,11 +124,9 @@ const sendTestPrompt = async (settings: LlmSettings, prompt: string): Promise<st
     const data = await response.json();
     console.log('API Success Response:', data);
 
-    // Extract content based on provider
-    if (settings.provider === 'azure-openai' || settings.provider === 'openai') {
+    if (config.provider === 'azure-openai' || config.provider === 'openai') {
       return data.choices?.[0]?.message?.content?.trim() ?? "No content found in response.";
-    } else if (settings.provider === 'gemini') {
-        // Handle potential safety ratings causing blocked prompts
+    } else if (config.provider === 'gemini') {
       if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
            return data.candidates[0].content.parts[0].text.trim();
        } else if (data.promptFeedback?.blockReason) {
@@ -151,7 +135,7 @@ const sendTestPrompt = async (settings: LlmSettings, prompt: string): Promise<st
             return "No content found or unexpected response structure from Gemini.";
         }
     } else {
-        return "Error: Provider response parsing not implemented."; // Should not happen if initial check passes
+        return "Error: Provider response parsing not implemented.";
     }
 
   } catch (error: any) {
@@ -159,7 +143,6 @@ const sendTestPrompt = async (settings: LlmSettings, prompt: string): Promise<st
     return `Error: ${error.message || 'An unexpected error occurred during the API call.'}`;
   }
 };
-
 
 export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings, currentLanguage = 'en' }) => {
   // Get translations for current language
@@ -204,53 +187,59 @@ export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings, currentLangu
       <Typography variant="h6" gutterBottom>
         {T.title}
       </Typography>
-      <Box sx={{ height: '300px', overflowY: 'auto', border: '1px solid #ccc', p: 2, mb: 2, borderRadius: '4px' }}>
-        {messages.map((msg, index) => (
-          <Box key={index} sx={{ mb: 1, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
-            <Paper 
-              elevation={1} 
-              sx={{ 
-                p: 1, 
-                display: 'inline-block', 
-                bgcolor: msg.role === 'user' ? 'primary.light' : 'grey.200',
-                color: msg.role === 'user' ? 'primary.contrastText' : 'text.primary',
-                borderRadius: '10px',
-                maxWidth: '80%',
-              }}
-            >
-              <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Typography>
-            </Paper>
-          </Box>
-        ))}
-        {isLoading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
-            <CircularProgress size={24} />
-          </Box>
+      <Box sx={{ mt: 4 }}>
+        {/* Test Chat Area */}
+        {!settings.configurations.length ? (
+          <Typography color="textSecondary" sx={{ mt: 1, fontSize: '0.9rem' }}>
+            Please configure and save the provider settings above before testing.
+          </Typography>
+        ) : (
+          <>
+            <Box sx={{ height: '300px', overflowY: 'auto', border: '1px solid #ccc', p: 2, mb: 2, borderRadius: '4px' }}>
+              {messages.map((msg, index) => (
+                <Box key={index} sx={{ mb: 1, textAlign: msg.role === 'user' ? 'right' : 'left' }}>
+                  <Paper 
+                    elevation={1} 
+                    sx={{ 
+                      p: 1, 
+                      display: 'inline-block', 
+                      bgcolor: msg.role === 'user' ? 'primary.light' : 'grey.200',
+                      color: msg.role === 'user' ? 'primary.contrastText' : 'text.primary',
+                      borderRadius: '10px',
+                      maxWidth: '80%',
+                    }}
+                  >
+                    <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{msg.content}</Typography>
+                  </Paper>
+                </Box>
+              ))}
+              {isLoading && (
+                <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
+                  <CircularProgress size={24} />
+                </Box>
+              )}
+              <div ref={messagesEndRef} />
+            </Box>
+            <Box sx={{ display: 'flex', gap: 1 }}>
+              <TextField
+                fullWidth
+                value={inputPrompt}
+                onChange={(e) => setInputPrompt(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSendPrompt()}
+                placeholder={T.inputPlaceholder}
+                disabled={isLoading}
+              />
+              <Button
+                variant="contained"
+                onClick={handleSendPrompt}
+                disabled={!inputPrompt.trim() || isLoading}
+              >
+                {isLoading ? T.sending : T.send}
+              </Button>
+            </Box>
+          </>
         )}
-        <div ref={messagesEndRef} />
       </Box>
-      <Box sx={{ display: 'flex', gap: 1 }}>
-        <TextField
-          fullWidth
-          value={inputPrompt}
-          onChange={(e) => setInputPrompt(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && handleSendPrompt()}
-          placeholder={T.inputPlaceholder}
-          disabled={isLoading}
-        />
-        <Button
-          variant="contained"
-          onClick={handleSendPrompt}
-          disabled={!inputPrompt.trim() || isLoading}
-        >
-          {isLoading ? T.sending : T.send}
-        </Button>
-      </Box>
-       {!settings.provider || !settings.apiUrl || !settings.apiToken ? (
-         <Typography color="textSecondary" sx={{ mt: 1, fontSize: '0.9rem' }}>
-           Please configure and save the provider settings above before testing.
-         </Typography>
-       ) : null}
     </Paper>
   );
 }; 

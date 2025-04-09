@@ -8,7 +8,7 @@ import { ChatInput } from '../features/chat/components/ChatInput';
 import { ChatMessages } from '../features/chat/components/ChatMessages';
 import { TeamSelector } from '../features/chat/components/TeamSelector'; // Restore TeamSelector import
 import '../features/chat/styles/chat.css';
-import { LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
+import { LlmConfig, LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
 import { LlmApiService } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
 import { getOrganizationAndProject } from '../services/sdk/AzureDevOpsInfoService';
@@ -59,6 +59,12 @@ const ChatPage: React.FC = () => {
   // Add new state to track if we can stop generation
   const [canStopGeneration, setCanStopGeneration] = React.useState(false);
 
+  // Inside ChatPage component, add new state for current LLM
+  const [currentLlm, setCurrentLlm] = React.useState<LlmConfig | null>(null);
+
+  // Add AbortController ref
+  const abortControllerRef = React.useRef<AbortController | null>(null);
+
   const T = translations[currentLanguage]; // Get current language translations
 
   React.useEffect(() => {
@@ -104,7 +110,10 @@ const ChatPage: React.FC = () => {
         try {
           const fetchedLlmSettings = await LlmSettingsService.getSettings();
           setLlmSettings(fetchedLlmSettings);
-          setWorkItemSysPrompt(fetchedLlmSettings.createWorkItemPlanSystemPrompt || ''); // Set the prompt state
+          // Set initial current LLM to default or first configuration
+          const defaultConfig = fetchedLlmSettings.configurations.find(c => c.isDefault) || fetchedLlmSettings.configurations[0] || null;
+          setCurrentLlm(defaultConfig);
+          setWorkItemSysPrompt(fetchedLlmSettings.createWorkItemPlanSystemPrompt || '');
         } catch (llmErr) {
           console.error('Failed to load LLM settings:', llmErr);
           // Decide if you want to show an error or just proceed without the provider info
@@ -337,6 +346,12 @@ const ChatPage: React.FC = () => {
 
   // Add new function to handle stopping generation
   const handleStopGeneration = () => {
+    // Abort any ongoing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
     // Clear streaming state
     const currentStreamingId = streamingMessageIdRef.current;
     if (currentStreamingId) {
@@ -355,10 +370,18 @@ const ChatPage: React.FC = () => {
     }
   };
 
+  // Add handler for LLM change
+  const handleLlmChange = (config: LlmConfig) => {
+    setCurrentLlm(config);
+  };
+
   const handleSendMessage = (prompt: string) => {
     if (!prompt.trim() || !llmSettings || isLoadingResponse) return; 
 
     console.log("Starting to send message:", prompt.substring(0, 30) + "...");
+
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
 
     // Add the user message
     const userMessage: Message = { 
@@ -395,6 +418,12 @@ const ChatPage: React.FC = () => {
     console.log(`Streaming from LLM (Lang: ${currentLanguage}, Context: ${context}):`, prompt.substring(0, 30) + "...");
     
     if (selectedAction === 'create_wi') {
+      // Check if we have a selected LLM
+      if (!currentLlm) {
+        handleStreamError(new Error('No LLM configuration selected'));
+        return;
+      }
+
       // Stream work item plan creation
       LlmApiService.createWorkItemPlanStream(
         llmSettings,
@@ -408,13 +437,22 @@ const ChatPage: React.FC = () => {
         (error) => {
           handleStreamError(error);
           setCanStopGeneration(false); // Disable stop generation on error
-        }
+        },
+        currentLlm, // Pass the currently selected LLM configuration
+        abortControllerRef.current // Pass the abort controller
       );
     } else {
       // Stream general queries
       const generalPrompt = `Please respond in ${currentLanguage === 'en' ? 'English' : 'Turkish'}. User request: ${prompt}`;
+      
+      // Use the currently selected LLM instead of default
+      if (!currentLlm) {
+        handleStreamError(new Error('No LLM configuration selected'));
+        return;
+      }
+
       LlmApiService.streamPromptToLlm(
-        llmSettings,
+        currentLlm,
         generalPrompt,
         updateStreamingMessage,
         (fullResponse) => {
@@ -424,7 +462,8 @@ const ChatPage: React.FC = () => {
         (error) => {
           handleStreamError(error);
           setCanStopGeneration(false); // Disable stop generation on error
-        }
+        },
+        abortControllerRef.current // Pass the abort controller
       );
     }
   };
@@ -447,7 +486,9 @@ const ChatPage: React.FC = () => {
          projectName={orgProjectInfo.projectName}
          currentLanguage={currentLanguage}
          onLanguageChange={handleLanguageChange}
-         llmProvider={llmSettings?.provider || null}
+         llmConfigurations={llmSettings?.configurations || []}
+         onLlmChange={handleLlmChange}
+         currentLlm={currentLlm}
       />
 
       <Container 
@@ -517,6 +558,7 @@ const ChatPage: React.FC = () => {
                       currentLanguage={currentLanguage}
                       onChangeTeamRequest={handleChangeTeamRequest}
                       onStopGeneration={canStopGeneration ? handleStopGeneration : undefined}
+                      selectedLlm={currentLlm}
                  />
               )}
            </Box>

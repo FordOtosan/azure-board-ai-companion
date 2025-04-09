@@ -172,11 +172,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   
   // Work Item Prompts state
   const [llmSettings, setLlmSettings] = useState<LlmSettings>({
-    provider: null,
-    apiUrl: '',
-    apiToken: '',
-    temperature: 0.7,
-    costPerMillionTokens: 0.0,
+    configurations: [],
     createWorkItemPlanSystemPrompt: '',
   });
   const [llmLoading, setLlmLoading] = useState(true);
@@ -280,10 +276,12 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
 
   // Handler for LLM settings text field changes
   const handleLlmInputChange = (field: keyof LlmSettings) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    setLlmSettings({
-      ...llmSettings,
-      [field]: event.target.value
-    });
+    if (field === 'createWorkItemPlanSystemPrompt') {
+      setLlmSettings({
+        ...llmSettings,
+        createWorkItemPlanSystemPrompt: event.target.value
+      });
+    }
   };
 
   // Handler for saving LLM settings
@@ -627,7 +625,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
         
         <Collapse in={isPromptsExpanded} timeout="auto">
           <Box p={2}>
-            {!llmSettings.provider ? (
+            {!llmSettings.configurations.length ? (
               <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic', mb: 2 }}>
                 {T.configureAiProvider}
               </Typography>
@@ -653,7 +651,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
                 variant="contained" 
                 color="primary" 
                 onClick={saveLlmSettings}
-                disabled={llmSaving || !llmSettings.provider}
+                disabled={llmSaving || !llmSettings.configurations.length}
               >
                 {llmSaving ? T.savingPrompts : T.savePrompts}
               </Button>

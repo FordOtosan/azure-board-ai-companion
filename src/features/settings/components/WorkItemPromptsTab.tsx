@@ -5,11 +5,7 @@ import '../styles/settings.css';
 
 export const WorkItemPromptsTab: React.FC = () => {
   const [settings, setSettings] = React.useState<LlmSettings>({
-    provider: null,
-    apiUrl: '',
-    apiToken: '',
-    temperature: 0.7,
-    costPerMillionTokens: 0.0,
+    configurations: [],
     createWorkItemPlanSystemPrompt: '',
   });
   
@@ -80,6 +76,8 @@ export const WorkItemPromptsTab: React.FC = () => {
     return <Box p={3}>Loading settings...</Box>;
   }
 
+  const hasProvider = settings.configurations.length > 0;
+
   return (
     <Box p={3}>
       <Typography variant="h5" gutterBottom>
@@ -90,7 +88,7 @@ export const WorkItemPromptsTab: React.FC = () => {
         <Typography variant="h6" gutterBottom>
           Work Item Prompt Configuration
         </Typography>
-        {!settings.provider ? (
+        {!hasProvider ? (
           <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic' }}>
             Please configure an AI provider in the LLM Settings tab before setting up work item prompts.
           </Typography>
@@ -118,7 +116,7 @@ export const WorkItemPromptsTab: React.FC = () => {
           variant="contained" 
           color="primary" 
           onClick={handleSaveSettings}
-          disabled={saving || !settings.provider}
+          disabled={saving || !hasProvider}
         >
           {saving ? 'Saving...' : 'Save Settings'}
         </Button>

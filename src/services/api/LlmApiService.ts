@@ -1,4 +1,4 @@
-import { LlmSettings } from '../../features/settings/services/LlmSettingsService';
+import { LlmConfig, LlmSettings } from '../../features/settings/services/LlmSettingsService';
 
 // Define the JSON response format for work item plans
 export interface WorkItemPlanResponse {
@@ -25,6 +25,10 @@ export type StreamErrorCallback = (error: Error) => void;
  * Service for handling LLM API calls
  */
 export class LlmApiService {
+  private static getDefaultConfig(settings: LlmSettings): LlmConfig | null {
+    return settings.configurations.find(config => config.isDefault) || settings.configurations[0] || null;
+  }
+
   /**
    * Sends a work item plan request to the LLM API
    * Uses a 3-part prompt structure:
@@ -37,11 +41,16 @@ export class LlmApiService {
     prompt: string,
     language: string
   ): Promise<string> {
+    const config = this.getDefaultConfig(settings);
+    if (!config) {
+      throw new Error('No LLM configuration available');
+    }
+
     // Create the full prompt with all three parts
     const fullPrompt = this.buildWorkItemPlanPrompt(prompt, settings.createWorkItemPlanSystemPrompt || '', language);
     
     // Send the prompt to the LLM API
-    const response = await this.sendPromptToLlm(settings, fullPrompt);
+    const response = await this.sendPromptToLlm(config, fullPrompt);
     return response;
   }
 
@@ -54,13 +63,22 @@ export class LlmApiService {
     language: string,
     onChunk: StreamChunkCallback,
     onComplete: StreamCompleteCallback,
-    onError: StreamErrorCallback
+    onError: StreamErrorCallback,
+    config?: LlmConfig | null,
+    abortController?: AbortController
   ): void {
+    // Use provided config or fall back to default if not provided
+    const llmConfig = config || this.getDefaultConfig(settings);
+    if (!llmConfig) {
+      onError(new Error('No LLM configuration available'));
+      return;
+    }
+
     // Create the full prompt with all three parts
     const fullPrompt = this.buildWorkItemPlanPrompt(prompt, settings.createWorkItemPlanSystemPrompt || '', language);
     
-    // Stream the prompt to the LLM API
-    this.streamPromptToLlm(settings, fullPrompt, onChunk, onComplete, onError);
+    // Stream the prompt to the LLM API with abort controller
+    this.streamPromptToLlm(llmConfig, fullPrompt, onChunk, onComplete, onError, abortController);
   }
 
   /**
@@ -132,36 +150,36 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
   /**
    * Sends a prompt to the LLM API based on the provider configured in settings
    */
-  static async sendPromptToLlm(settings: LlmSettings, prompt: string): Promise<string> {
-    console.log('Sending prompt to LLM:', { provider: settings.provider });
+  static async sendPromptToLlm(config: LlmConfig, prompt: string): Promise<string> {
+    console.log('Sending prompt to LLM:', { provider: config.provider });
 
-    if (!settings.provider || !settings.apiUrl || !settings.apiToken) {
+    if (!config.provider || !config.apiUrl || !config.apiToken) {
       return "Error: LLM provider, API URL, or API Token not configured correctly.";
     }
 
-    let requestUrl = settings.apiUrl;
+    let requestUrl = config.apiUrl;
     let requestBody: any;
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
 
     try {
-      if (settings.provider === 'azure-openai' || settings.provider === 'openai') {
+      if (config.provider === 'azure-openai' || config.provider === 'openai') {
         requestBody = JSON.stringify({
           messages: [{ role: 'user', content: prompt }],
-          temperature: settings.temperature ?? 0.7,
+          temperature: config.temperature ?? 0.7,
           max_tokens: 4000 // Increased for longer responses
         });
         
-        if (settings.provider === 'azure-openai') {
-            headers['api-key'] = settings.apiToken;
+        if (config.provider === 'azure-openai') {
+            headers['api-key'] = config.apiToken;
             if (!requestUrl.includes('api-version=')) {
                 const separator = requestUrl.includes('?') ? '&' : '?';
                 requestUrl += `${separator}api-version=2023-07-01-preview`; 
                 console.warn("Azure OpenAI API version not found in URL, appending default");
             }
         } else { // openai
-            headers['Authorization'] = `Bearer ${settings.apiToken}`;
+            headers['Authorization'] = `Bearer ${config.apiToken}`;
             if (!requestUrl.endsWith('/v1/chat/completions')) {
                 if (!requestUrl.endsWith('/')) {
                     requestUrl += '/';
@@ -170,8 +188,8 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
             }
         }
 
-      } else if (settings.provider === 'gemini') {
-          headers['x-goog-api-key'] = settings.apiToken;
+      } else if (config.provider === 'gemini') {
+          headers['x-goog-api-key'] = config.apiToken;
 
           if (!requestUrl.includes(':generateContent')) {
               if (!requestUrl.endsWith('/')) {
@@ -188,13 +206,13 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
         requestBody = JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: settings.temperature ?? 0.7,
+            temperature: config.temperature ?? 0.7,
             maxOutputTokens: 4000 // Increased for longer responses
           }
         });
 
       } else {
-        return `Error: Unsupported provider "${settings.provider}" selected.`;
+        return `Error: Unsupported provider "${config.provider}" selected.`;
       }
 
       console.log(`Making request to: ${requestUrl}`);
@@ -215,9 +233,9 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
       console.log('API Success Response received');
 
       // Extract content based on provider
-      if (settings.provider === 'azure-openai' || settings.provider === 'openai') {
+      if (config.provider === 'azure-openai' || config.provider === 'openai') {
         return data.choices?.[0]?.message?.content?.trim() ?? "No content found in response.";
-      } else if (settings.provider === 'gemini') {
+      } else if (config.provider === 'gemini') {
         if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
              return data.candidates[0].content.parts[0].text.trim();
          } else if (data.promptFeedback?.blockReason) {
@@ -239,20 +257,21 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
    * Streams a prompt to the LLM API with callbacks for each chunk of the response
    */
   static streamPromptToLlm(
-    settings: LlmSettings, 
+    config: LlmConfig,
     prompt: string,
     onChunk: StreamChunkCallback,
     onComplete: StreamCompleteCallback,
-    onError: StreamErrorCallback
+    onError: StreamErrorCallback,
+    abortController?: AbortController
   ): void {
-    console.log('Streaming prompt to LLM:', { provider: settings.provider });
+    console.log('Streaming prompt to LLM:', { provider: config.provider });
 
-    if (!settings.provider || !settings.apiUrl || !settings.apiToken) {
+    if (!config.provider || !config.apiUrl || !config.apiToken) {
       onError(new Error("LLM provider, API URL, or API Token not configured correctly."));
       return;
     }
 
-    let requestUrl = settings.apiUrl;
+    let requestUrl = config.apiUrl;
     let requestBody: any;
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
@@ -262,24 +281,24 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
     let fullResponse = '';
 
     try {
-      if (settings.provider === 'azure-openai' || settings.provider === 'openai') {
+      if (config.provider === 'azure-openai' || config.provider === 'openai') {
         // Add stream: true to request body for streaming
         requestBody = JSON.stringify({
           messages: [{ role: 'user', content: prompt }],
-          temperature: settings.temperature ?? 0.7,
+          temperature: config.temperature ?? 0.7,
           max_tokens: 4000,
           stream: true // Enable streaming for OpenAI models
         });
         
-        if (settings.provider === 'azure-openai') {
-            headers['api-key'] = settings.apiToken;
+        if (config.provider === 'azure-openai') {
+            headers['api-key'] = config.apiToken;
             if (!requestUrl.includes('api-version=')) {
                 const separator = requestUrl.includes('?') ? '&' : '?';
                 requestUrl += `${separator}api-version=2023-07-01-preview`; 
                 console.warn("Azure OpenAI API version not found in URL, appending default");
             }
         } else { // openai
-            headers['Authorization'] = `Bearer ${settings.apiToken}`;
+            headers['Authorization'] = `Bearer ${config.apiToken}`;
             if (!requestUrl.endsWith('/v1/chat/completions')) {
                 if (!requestUrl.endsWith('/')) {
                     requestUrl += '/';
@@ -288,11 +307,12 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
             }
         }
 
-        // Make the fetch request with streaming
+        // Make the fetch request with streaming and abort signal
         fetch(requestUrl, {
           method: 'POST',
           headers: headers,
           body: requestBody,
+          signal: abortController?.signal
         })
           .then(response => {
             if (!response.ok) {
@@ -308,6 +328,12 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
 
             // Process the stream
             const processStream = ({ done, value }: ReadableStreamReadResult<Uint8Array>): Promise<void> => {
+              // Check if aborted
+              if (abortController?.signal.aborted) {
+                reader.cancel(); // Cancel the reader
+                throw new Error('Request aborted');
+              }
+
               if (done) {
                 // Stream complete, call the complete callback
                 onComplete(fullResponse);
@@ -345,19 +371,17 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
             return reader.read().then(processStream);
           })
           .catch(error => {
-            console.error("Stream error:", error);
-            onError(error);
+            // Only call onError if it wasn't aborted
+            if (!abortController?.signal.aborted || error.message !== 'Request aborted') {
+              console.error("Stream error:", error);
+              onError(error);
+            }
           });
 
-      } else if (settings.provider === 'gemini') {
-        // Gemini doesn't support streaming via simple fetch API,
-        // so we'll simulate streaming by sending a non-streaming request
-        // and chunking the response
-
-        // Set API key in header
-        headers['x-goog-api-key'] = settings.apiToken;
+      } else if (config.provider === 'gemini') {
+        // For Gemini, we'll use the abort signal for the main request
+        headers['x-goog-api-key'] = config.apiToken;
         
-        // Ensure URL has correct format for Gemini API
         if (!requestUrl.includes(':generateContent')) {
             if (!requestUrl.endsWith('/')) {
                 requestUrl += '/';
@@ -369,19 +393,11 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
                 requestUrl += ':generateContent';
             }
         }
-        
-        // Also add API key as URL parameter (alternative auth method)
-        if (!requestUrl.includes('key=')) {
-            const separator = requestUrl.includes('?') ? '&' : '?';
-            requestUrl += `${separator}key=${encodeURIComponent(settings.apiToken)}`;
-        }
-        
-        console.log(`Constructed Gemini request URL (masked): ${requestUrl.replace(settings.apiToken, '***')}`);
 
         requestBody = JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: settings.temperature ?? 0.7,
+            temperature: config.temperature ?? 0.7,
             maxOutputTokens: 4000
           }
         });
@@ -390,8 +406,14 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
           method: 'POST',
           headers: headers,
           body: requestBody,
+          signal: abortController?.signal
         })
           .then(async response => {
+            // Check if aborted
+            if (abortController?.signal.aborted) {
+              throw new Error('Request aborted');
+            }
+
             const contentType = response.headers.get('content-type');
             if (!response.ok) {
               console.error(`Gemini API error: ${response.status} ${response.statusText}`);
@@ -413,27 +435,16 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
             }
           })
           .then(data => {
+            // Check if aborted before processing response
+            if (abortController?.signal.aborted) {
+              throw new Error('Request aborted');
+            }
+
             console.log('Gemini API response received');
             
             if (data.error) {
               throw new Error(`Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
             }
-            
-            // Debug log to see the structure of the Gemini response
-            console.log('Gemini response structure:', JSON.stringify({
-              hasCandidates: !!data.candidates,
-              candidatesLength: data.candidates?.length,
-              hasFirstCandidate: !!data.candidates?.[0],
-              hasContent: !!data.candidates?.[0]?.content,
-              hasParts: !!data.candidates?.[0]?.content?.parts,
-              partsLength: data.candidates?.[0]?.content?.parts?.length,
-              hasText: !!data.candidates?.[0]?.content?.parts?.[0]?.text,
-              hasCandidate0Text: !!data.candidates?.[0]?.text,
-              hasDataText: !!data.text,
-              hasContentParts: !!data.content?.parts,
-              contentPartsLength: data.content?.parts?.length,
-              hasContentPartsText: !!data.content?.parts?.[0]?.text
-            }, null, 2));
             
             // Extract content from Gemini response
             const content = data.candidates?.[0]?.content?.parts?.[0]?.text || 
@@ -444,88 +455,47 @@ IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
             
             console.log(`Gemini returned content length: ${content.length} chars. Beginning streaming simulation...`);
             
-            // FIXED IMPLEMENTATION: Improved streaming simulation for Gemini
-            
             if (!content || content.length === 0) {
               console.warn('No content to stream from Gemini response');
               onComplete('');
               return;
             }
-            
-            // First, send a small first chunk immediately for better UX
-            const firstChunk = content.substring(0, 5); // First few chars
-            console.log('Sending initial Gemini chunk:', firstChunk);
-            onChunk(firstChunk);
-            
-            // Create more natural-looking chunks, respecting word boundaries where possible
-            let currentPos = firstChunk.length;
-            const remainingText = content.substring(currentPos);
-            
-            // Split by words/spaces but preserve some punctuation
-            const chunks: string[] = [];
-            const regex = /([^\s]+\s*)/g;
-            let match;
-            
-            while ((match = regex.exec(remainingText)) !== null) {
-              chunks.push(match[0]);
-            }
-            
-            // If no matches or very short content, chunk by characters
-            if (chunks.length === 0) {
-              for (let i = currentPos; i < content.length; i += 5) {
-                chunks.push(content.substring(i, Math.min(i + 5, content.length)));
-              }
-            }
-            
-            console.log(`Gemini streaming: Split into ${chunks.length} chunks`);
-            
+
+            // Simulate streaming with abort support
             let chunkIndex = 0;
-            let isCompleting = false; // Flag to prevent multiple completions
+            const chunks = content.match(/[^\.!?]+[\.!?]+/g) || [content];
             
-            const interval = setInterval(() => {
+            const streamInterval = setInterval(() => {
+              // Check if aborted
+              if (abortController?.signal.aborted) {
+                clearInterval(streamInterval);
+                return;
+              }
+
               if (chunkIndex < chunks.length) {
                 const chunk = chunks[chunkIndex++];
-                console.log(`Gemini streaming: Sending chunk ${chunkIndex}/${chunks.length}, content: "${chunk.substring(0, 10)}${chunk.length > 10 ? '...' : ''}"`);
-                
-                try {
-                  onChunk(chunk);
-                } catch (err) {
-                  console.error('Error in chunk callback:', err);
-                  // Continue processing anyway to avoid stuck state
-                }
-                
-                // If this is the last chunk, schedule completion after a short delay
-                // to ensure the UI has time to process the last chunk
-                if (chunkIndex >= chunks.length && !isCompleting) {
-                  isCompleting = true;
-                  console.log('Gemini streaming: Last chunk sent, scheduling completion');
-                  
-                  // Use a small timeout to ensure the last chunk is processed
-                  setTimeout(() => {
-                    console.log('Gemini streaming: Complete, clearing interval');
-                    clearInterval(interval);
-                    // Ensure we pass the full original content to the completion handler
-                    onComplete(content);
-                  }, 200);
-                }
+                fullResponse += chunk;
+                onChunk(chunk);
               } else {
-                // This is a failsafe in case the completion wasn't triggered by the last chunk logic
-                if (!isCompleting) {
-                  isCompleting = true;
-                  console.log('Gemini streaming: Complete (failsafe), clearing interval');
-                  clearInterval(interval);
-                  // Ensure we pass the full original content to the completion handler
-                  onComplete(content);
-                }
+                clearInterval(streamInterval);
+                onComplete(fullResponse);
               }
-            }, 30); // Slightly faster interval for better UX
+            }, 50);
+
+            // Add abort listener to clear interval
+            abortController?.signal.addEventListener('abort', () => {
+              clearInterval(streamInterval);
+            });
           })
           .catch(error => {
-            console.error('Error in Gemini API request:', error);
-            onError(error);
+            // Only call onError if it wasn't aborted
+            if (!abortController?.signal.aborted || error.message !== 'Request aborted') {
+              console.error('Error in Gemini API request:', error);
+              onError(error);
+            }
           });
       } else {
-        onError(new Error(`Unsupported provider "${settings.provider}" selected.`));
+        onError(new Error(`Unsupported provider "${config.provider}" selected.`));
       }
     } catch (error: any) {
       console.error("Failed to stream prompt to LLM:", error);

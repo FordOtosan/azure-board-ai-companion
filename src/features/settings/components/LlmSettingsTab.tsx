@@ -1,10 +1,13 @@
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
 import {
   Alert,
   Box,
   Button,
-  Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   IconButton,
   InputAdornment,
@@ -13,14 +16,21 @@ import {
   RadioGroup,
   Slider,
   Snackbar,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
   TextField,
+  Tooltip,
   Typography
 } from '@mui/material';
 import * as React from 'react';
 import { Language } from '../../../translations';
-import { LlmSettings, LlmSettingsService } from '../services/LlmSettingsService';
+import { LLM_PROVIDERS, LlmProvider } from '../../../types/llm';
+import { LlmConfig, LlmSettings, LlmSettingsService } from '../services/LlmSettingsService';
 import '../styles/settings.css';
-import { LlmTestChat } from './LlmTestChat';
 
 // Define translations for the component
 const llmSettingsTranslations = {
@@ -40,7 +50,21 @@ const llmSettingsTranslations = {
     loadingSettings: "Loading settings...",
     saveSuccess: "Settings saved successfully",
     saveError: "Failed to save settings",
-    loadError: "Failed to load settings"
+    loadError: "Failed to load settings",
+    addNewModel: "Add New Model",
+    editModel: "Edit Model",
+    deleteModel: "Delete Model",
+    modelName: "Model Name",
+    provider: "Provider",
+    actions: "Actions",
+    confirmDelete: "Are you sure you want to delete this model?",
+    cancel: "Cancel",
+    save: "Save",
+    delete: "Delete",
+    default: "Default",
+    setAsDefault: "Set as Default",
+    providerExists: "A model with this provider already exists",
+    nameRequired: "Model name is required"
   },
   tr: {
     title: "LLM Ayarları",
@@ -58,7 +82,21 @@ const llmSettingsTranslations = {
     loadingSettings: "Ayarlar yükleniyor...",
     saveSuccess: "Ayarlar başarıyla kaydedildi",
     saveError: "Ayarlar kaydedilemedi",
-    loadError: "Ayarlar yüklenemedi"
+    loadError: "Ayarlar yüklenemedi",
+    addNewModel: "Yeni Model Ekle",
+    editModel: "Modeli Düzenle",
+    deleteModel: "Modeli Sil",
+    modelName: "Model Adı",
+    provider: "Sağlayıcı",
+    actions: "İşlemler",
+    confirmDelete: "Bu modeli silmek istediğinizden emin misiniz?",
+    cancel: "İptal",
+    save: "Kaydet",
+    delete: "Sil",
+    default: "Varsayılan",
+    setAsDefault: "Varsayılan Olarak Ayarla",
+    providerExists: "Bu sağlayıcı için zaten bir model var",
+    nameRequired: "Model adı gereklidir"
   }
 };
 
@@ -66,18 +104,26 @@ interface LlmSettingsTabProps {
   currentLanguage: Language;
 }
 
-export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage }) => {
-  // Get translations for current language
-  const T = llmSettingsTranslations[currentLanguage];
+interface DialogState {
+  open: boolean;
+  mode: 'add' | 'edit';
+  config: LlmConfig;
+}
 
-  const [settings, setSettings] = React.useState<LlmSettings>({
-    provider: null,
-    apiUrl: '',
-    apiToken: '',
-    temperature: 0.7,
-    costPerMillionTokens: 0.0,
-  });
-  
+const defaultConfig: LlmConfig = {
+  id: '',
+  provider: null,
+  apiUrl: '',
+  apiToken: '',
+  temperature: 0.7,
+  costPerMillionTokens: 0.0,
+  name: '',
+  isDefault: false
+};
+
+export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage }) => {
+  const T = llmSettingsTranslations[currentLanguage];
+  const [settings, setSettings] = React.useState<LlmSettings>({ configurations: [] });
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [snackbar, setSnackbar] = React.useState({
@@ -85,56 +131,32 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
     message: '',
     severity: 'success' as 'success' | 'error'
   });
-  const [isTestChatVisible, setIsTestChatVisible] = React.useState(false);
+  const [dialog, setDialog] = React.useState<DialogState>({
+    open: false,
+    mode: 'add',
+    config: { ...defaultConfig }
+  });
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = React.useState(false);
+  const [selectedConfig, setSelectedConfig] = React.useState<LlmConfig | null>(null);
 
   React.useEffect(() => {
-    const loadSettings = async () => {
-      try {
-        const savedSettings = await LlmSettingsService.getSettings();
-        setSettings(savedSettings);
-      } catch (error) {
-        console.error('Error loading settings:', error);
-        setSnackbar({
-          open: true,
-          message: T.loadError,
-          severity: 'error'
-        });
-      } finally {
-        setLoading(false);
-      }
-    };
-
     loadSettings();
-  }, [T.loadError]);
+  }, []);
 
-  const handleProviderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSettings({
-      ...settings,
-      provider: (event.target.value as LlmSettings['provider'])
-    });
-    setIsTestChatVisible(false);
-  };
-
-  const handleInputChange = (field: keyof LlmSettings) => (event: React.ChangeEvent<HTMLInputElement>) => {
-    setSettings({
-      ...settings,
-      [field]: event.target.value
-    });
-  };
-
-  const handleTemperatureChange = (_event: Event, newValue: number | number[]) => {
-    setSettings({
-      ...settings,
-      temperature: newValue as number
-    });
-  };
-
-  const handleCostChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const value = parseFloat(event.target.value);
-    setSettings({
-      ...settings,
-      costPerMillionTokens: isNaN(value) ? 0 : value
-    });
+  const loadSettings = async () => {
+    try {
+      const savedSettings = await LlmSettingsService.getSettings();
+      setSettings(savedSettings);
+    } catch (error) {
+      console.error('Error loading settings:', error);
+      setSnackbar({
+        open: true,
+        message: T.loadError,
+        severity: 'error'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -158,15 +180,129 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
     }
   };
 
-  const handleCloseSnackbar = () => {
-    setSnackbar({
-      ...snackbar,
-      open: false
+  const handleAddModel = () => {
+    setDialog({
+      open: true,
+      mode: 'add',
+      config: { ...defaultConfig, id: Date.now().toString() }
     });
   };
 
-  const toggleTestChatVisibility = () => {
-    setIsTestChatVisible((prev) => !prev);
+  const handleEditModel = (config: LlmConfig) => {
+    setDialog({
+      open: true,
+      mode: 'edit',
+      config: { ...config }
+    });
+  };
+
+  const handleDeleteModel = (config: LlmConfig) => {
+    setSelectedConfig(config);
+    setDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (selectedConfig) {
+      const newConfigs = settings.configurations.filter(c => c.id !== selectedConfig.id);
+      const newSettings = { ...settings, configurations: newConfigs };
+      try {
+        await LlmSettingsService.saveSettings(newSettings);
+        setSettings(newSettings);
+        setSnackbar({
+          open: true,
+          message: T.saveSuccess,
+          severity: 'success'
+        });
+      } catch (error) {
+        console.error('Error saving settings:', error);
+        setSnackbar({
+          open: true,
+          message: T.saveError,
+          severity: 'error'
+        });
+      }
+      setDeleteConfirmOpen(false);
+      setSelectedConfig(null);
+    }
+  };
+
+  const handleDialogClose = () => {
+    setDialog({ ...dialog, open: false });
+  };
+
+  const handleDialogSave = async () => {
+    const { config, mode } = dialog;
+    
+    // Validation
+    if (!config.name?.trim()) {
+      setSnackbar({
+        open: true,
+        message: T.nameRequired,
+        severity: 'error'
+      });
+      return;
+    }
+
+    if (mode === 'add' && settings.configurations.some(c => c.provider === config.provider)) {
+      setSnackbar({
+        open: true,
+        message: T.providerExists,
+        severity: 'error'
+      });
+      return;
+    }
+
+    const newConfigs = mode === 'add'
+      ? [...settings.configurations, config]
+      : settings.configurations.map(c => c.id === config.id ? config : c);
+
+    const newSettings = { ...settings, configurations: newConfigs };
+    try {
+      await LlmSettingsService.saveSettings(newSettings);
+      setSettings(newSettings);
+      setSnackbar({
+        open: true,
+        message: T.saveSuccess,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      setSnackbar({
+        open: true,
+        message: T.saveError,
+        severity: 'error'
+      });
+      return;
+    }
+    setDialog({ ...dialog, open: false });
+  };
+
+  const handleSetDefault = async (config: LlmConfig) => {
+    const newConfigs = settings.configurations.map(c => ({
+      ...c,
+      isDefault: c.id === config.id
+    }));
+    const newSettings = { ...settings, configurations: newConfigs };
+    try {
+      await LlmSettingsService.saveSettings(newSettings);
+      setSettings(newSettings);
+      setSnackbar({
+        open: true,
+        message: T.saveSuccess,
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      setSnackbar({
+        open: true,
+        message: T.saveError,
+        severity: 'error'
+      });
+    }
+  };
+
+  const handleCloseSnackbar = () => {
+    setSnackbar({ ...snackbar, open: false });
   };
 
   if (loading) {
@@ -178,102 +314,188 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
       <Typography variant="h5" gutterBottom>
         {T.title}
       </Typography>
-      
+
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-        <Typography variant="h6" gutterBottom>
-          {T.selectProvider}
-        </Typography>
-        <RadioGroup
-          name="provider-radio-group"
-          value={settings.provider}
-          onChange={handleProviderChange}
-        >
-          <FormControlLabel value="azure-openai" control={<Radio />} label="Azure OpenAI Services" />
-          <FormControlLabel value="openai" control={<Radio />} label="OpenAI Services" />
-          <FormControlLabel value="gemini" control={<Radio />} label="Gemini" />
-        </RadioGroup>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+          <Typography variant="h6">{T.title}</Typography>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={handleAddModel}
+          >
+            {T.addNewModel}
+          </Button>
+        </Box>
+
+        <TableContainer>
+          <Table>
+            <TableHead>
+              <TableRow>
+                <TableCell>{T.modelName}</TableCell>
+                <TableCell>{T.provider}</TableCell>
+                <TableCell>{T.apiUrl}</TableCell>
+                <TableCell>{T.temperature}</TableCell>
+                <TableCell>{T.costPerMillion}</TableCell>
+                <TableCell align="center">{T.default}</TableCell>
+                <TableCell align="right">{T.actions}</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {settings.configurations.map((config) => (
+                <TableRow key={config.id}>
+                  <TableCell>{config.name}</TableCell>
+                  <TableCell>
+                    {LLM_PROVIDERS.find(p => p.value === config.provider)?.label || config.provider}
+                  </TableCell>
+                  <TableCell>{config.apiUrl}</TableCell>
+                  <TableCell>{config.temperature.toFixed(1)}</TableCell>
+                  <TableCell>${config.costPerMillionTokens.toFixed(2)}</TableCell>
+                  <TableCell align="center">
+                    {config.isDefault ? (
+                      <Typography variant="body2" color="primary">
+                        {T.default}
+                      </Typography>
+                    ) : (
+                      <Button
+                        size="small"
+                        onClick={() => handleSetDefault(config)}
+                      >
+                        {T.setAsDefault}
+                      </Button>
+                    )}
+                  </TableCell>
+                  <TableCell align="right">
+                    <IconButton onClick={() => handleEditModel(config)}>
+                      <Tooltip title={T.editModel}>
+                        <EditIcon />
+                      </Tooltip>
+                    </IconButton>
+                    <IconButton onClick={() => handleDeleteModel(config)}>
+                      <Tooltip title={T.deleteModel}>
+                        <DeleteIcon />
+                      </Tooltip>
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       </Paper>
 
-      {settings.provider && (
-        <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
-          <Typography variant="h6" gutterBottom>
-            {T.providerConfig}
-          </Typography>
-          <Box sx={{ mb: 3 }}>
+      {/* Model Dialog */}
+      <Dialog open={dialog.open} onClose={handleDialogClose} maxWidth="md" fullWidth>
+        <DialogTitle>
+          {dialog.mode === 'add' ? T.addNewModel : T.editModel}
+        </DialogTitle>
+        <DialogContent>
+          <Box sx={{ pt: 2, display: 'flex', flexDirection: 'column', gap: 2 }}>
+            <TextField
+              fullWidth
+              label={T.modelName}
+              value={dialog.config.name}
+              onChange={(e) => setDialog({
+                ...dialog,
+                config: { ...dialog.config, name: e.target.value }
+              })}
+            />
+
+            <Typography variant="subtitle1">{T.selectProvider}</Typography>
+            <RadioGroup
+              value={dialog.config.provider}
+              onChange={(e) => setDialog({
+                ...dialog,
+                config: {
+                  ...dialog.config,
+                  provider: e.target.value as LlmProvider,
+                  apiUrl: LLM_PROVIDERS.find(p => p.value === e.target.value)?.urlPlaceholder || ''
+                }
+              })}
+            >
+              {LLM_PROVIDERS.map((provider) => (
+                <FormControlLabel
+                  key={provider.value}
+                  value={provider.value}
+                  control={<Radio />}
+                  label={provider.label}
+                  disabled={dialog.mode === 'edit' || settings.configurations.some(c => c.provider === provider.value)}
+                />
+              ))}
+            </RadioGroup>
+
             <TextField
               fullWidth
               label={T.apiUrl}
-              variant="outlined"
-              value={settings.apiUrl}
-              onChange={handleInputChange('apiUrl')}
-              margin="normal"
-              placeholder={settings.provider === 'azure-openai' ? 'https://<your-resource>.openai.azure.com/openai/deployments/<your-deployment>/chat/completions?api-version=YYYY-MM-DD' : 
-                          settings.provider === 'openai' ? 'https://api.openai.com/v1/chat/completions' : 
-                          'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'}
+              value={dialog.config.apiUrl}
+              onChange={(e) => setDialog({
+                ...dialog,
+                config: { ...dialog.config, apiUrl: e.target.value }
+              })}
             />
+
             <TextField
               fullWidth
               label={T.apiToken}
-              variant="outlined"
               type="password"
-              value={settings.apiToken}
-              onChange={handleInputChange('apiToken')}
-              margin="normal"
+              value={dialog.config.apiToken}
+              onChange={(e) => setDialog({
+                ...dialog,
+                config: { ...dialog.config, apiToken: e.target.value }
+              })}
+            />
+
+            <Box>
+              <Typography gutterBottom>
+                {T.temperature}: {dialog.config.temperature.toFixed(1)}
+              </Typography>
+              <Slider
+                value={dialog.config.temperature}
+                onChange={(_, value) => setDialog({
+                  ...dialog,
+                  config: { ...dialog.config, temperature: value as number }
+                })}
+                min={0}
+                max={1}
+                step={0.1}
+                valueLabelDisplay="auto"
+              />
+            </Box>
+
+            <TextField
+              label={T.costPerMillion}
+              type="number"
+              value={dialog.config.costPerMillionTokens}
+              onChange={(e) => setDialog({
+                ...dialog,
+                config: { ...dialog.config, costPerMillionTokens: parseFloat(e.target.value) || 0 }
+              })}
+              InputProps={{
+                startAdornment: <InputAdornment position="start">$</InputAdornment>,
+              }}
             />
           </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDialogClose}>{T.cancel}</Button>
+          <Button onClick={handleDialogSave} variant="contained" color="primary">
+            {T.save}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-          <Typography gutterBottom>
-            {T.temperature}: {settings.temperature.toFixed(1)}
-          </Typography>
-          <Slider
-            value={settings.temperature}
-            onChange={handleTemperatureChange}
-            min={0}
-            max={1}
-            step={0.1}
-            valueLabelDisplay="auto"
-            sx={{ mb: 3 }}
-          />
-
-          <TextField
-            label={T.costPerMillion}
-            variant="outlined"
-            type="number"
-            value={settings.costPerMillionTokens.toString()}
-            onChange={handleCostChange}
-            InputProps={{
-              startAdornment: <InputAdornment position="start">$</InputAdornment>,
-            }}
-            fullWidth
-          />
-        </Paper>
-      )}
-
-      {/* Test LLM Integration */}
-      {settings.provider && (
-        <Paper elevation={1} sx={{ mt: 3, overflow: 'hidden' }}>
-          <Box 
-            onClick={toggleTestChatVisibility} 
-            sx={{ 
-              p: 2, 
-              display: 'flex', 
-              justifyContent: 'space-between', 
-              alignItems: 'center', 
-              cursor: 'pointer',
-              borderBottom: isTestChatVisible ? 1 : 0,
-              borderColor: 'divider'
-            }}
-          >
-            <Typography variant="h6">{T.testIntegration}</Typography>
-            <IconButton size="small">
-              {isTestChatVisible ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-            </IconButton>
-          </Box>
-          <Collapse in={isTestChatVisible} timeout="auto" unmountOnExit>
-            {isTestChatVisible && <LlmTestChat settings={settings} currentLanguage={currentLanguage} />}
-          </Collapse>
-        </Paper>
-      )}
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteConfirmOpen} onClose={() => setDeleteConfirmOpen(false)}>
+        <DialogTitle>{T.deleteModel}</DialogTitle>
+        <DialogContent>
+          <Typography>{T.confirmDelete}</Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteConfirmOpen(false)}>{T.cancel}</Button>
+          <Button onClick={handleConfirmDelete} color="error" variant="contained">
+            {T.delete}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Save Button */}
       <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
@@ -281,7 +503,7 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
           variant="contained" 
           color="primary" 
           onClick={handleSaveSettings}
-          disabled={saving || !settings.provider || !settings.apiUrl || !settings.apiToken}
+          disabled={saving || settings.configurations.length === 0}
         >
           {saving ? T.saving : T.saveSettings}
         </Button>
