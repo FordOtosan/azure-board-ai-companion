@@ -1,0 +1,77 @@
+/* General Settings Styles */
+.settings-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Work Item Settings Styles */
+.work-item-settings-paper {
+  margin-bottom: 16px;
+}
+
+.work-item-settings-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+/* Table Styles */
+.table-container {
+  min-height: 200px;
+}
+
+.table-empty-state {
+  padding: 32px;
+  text-align: center;
+  color: rgba(0, 0, 0, 0.6);
+}
+
+/* Form Styles */
+.form-container {
+  margin-top: 16px;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* Dialog Styles */
+.dialog-content {
+  min-width: 400px;
+}
+
+.checkbox-group {
+  margin-top: 16px;
+}
+
+/* Loading and Error States */
+.loading-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 200px;
+}
+
+.error-message {
+  margin-bottom: 16px;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 600px) {
+  .dialog-content {
+    min-width: 300px;
+  }
+  
+  .work-item-settings-title {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .work-item-settings-title button {
+    margin-top: 8px;
+    align-self: flex-end;
+  }
+}

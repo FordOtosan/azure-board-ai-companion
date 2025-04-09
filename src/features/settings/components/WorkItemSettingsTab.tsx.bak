@@ -1,0 +1,599 @@
+import AddIcon from '@mui/icons-material/Add';
+import DeleteIcon from '@mui/icons-material/Delete';
+import EditIcon from '@mui/icons-material/Edit';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import {
+    Alert,
+    Autocomplete,
+    Box,
+    Button,
+    Checkbox,
+    CircularProgress,
+    Collapse,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogContentText,
+    DialogTitle,
+    FormControlLabel,
+    FormGroup,
+    IconButton,
+    Paper,
+    Snackbar,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
+    TextField,
+    Tooltip,
+    Typography
+} from '@mui/material';
+import { WebApiTeam } from 'azure-devops-extension-api/Core';
+import React, { useEffect, useState } from 'react';
+import { getTeamsInProject } from '../../../services/api/TeamService';
+import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
+import { LlmSettings, LlmSettingsService } from '../services/LlmSettingsService';
+import {
+    TeamWorkItemConfig,
+    WorkItemSettings,
+    WorkItemSettingsService,
+    WorkItemTypeConfig
+} from '../services/WorkItemSettingsService';
+import '../styles/settings.css';
+
+// Main WorkItemSettingsTab component
+export const WorkItemSettingsTab: React.FC = () => {
+  // Work Item Mapping state
+  const [workItemSettings, setWorkItemSettings] = useState<WorkItemSettings>({ teamConfigs: [] });
+  const [workItemLoading, setWorkItemLoading] = useState(true);
+  const [workItemSaving, setWorkItemSaving] = useState(false);
+  const [teams, setTeams] = useState<WebApiTeam[]>([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
+  
+  // Work Item Prompts state
+  const [llmSettings, setLlmSettings] = useState<LlmSettings>({
+    provider: null,
+    apiUrl: '',
+    apiToken: '',
+    temperature: 0.7,
+    costPerMillionTokens: 0.0,
+    createWorkItemPlanSystemPrompt: '',
+  });
+  const [llmLoading, setLlmLoading] = useState(true);
+  const [llmSaving, setLlmSaving] = useState(false);
+  
+  // Shared state
+  const [error, setError] = useState<string | null>(null);
+  const [snackbar, setSnackbar] = useState({
+    open: false,
+    message: '',
+    severity: 'success' as 'success' | 'error'
+  });
+  
+  // Collapsible sections state
+  const [isMappingExpanded, setIsMappingExpanded] = useState(true);
+  const [isPromptsExpanded, setIsPromptsExpanded] = useState(false);
+
+  // Dialog state
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [selectedTeam, setSelectedTeam] = useState<WebApiTeam | null>(null);
+  const [currentConfig, setCurrentConfig] = useState<TeamWorkItemConfig | null>(null);
+  const [workItemTypes, setWorkItemTypes] = useState<WorkItemTypeConfig[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Toggle functions for collapsible sections
+  const toggleMappingExpanded = () => {
+    setIsMappingExpanded(!isMappingExpanded);
+  };
+
+  const togglePromptsExpanded = () => {
+    setIsPromptsExpanded(!isPromptsExpanded);
+  };
+
+  // Load all initial data
+  useEffect(() => {
+    const loadInitialData = async () => {
+      try {
+        // Load work item settings
+        setWorkItemLoading(true);
+        const savedWorkItemSettings = await WorkItemSettingsService.getSettings();
+        setWorkItemSettings(savedWorkItemSettings);
+        
+        // Load LLM settings
+        setLlmLoading(true);
+        const savedLlmSettings = await LlmSettingsService.getSettings();
+        setLlmSettings(savedLlmSettings);
+        
+        // Load teams for the org/project
+        await loadTeams();
+      } catch (error) {
+        console.error('Error loading initial data:', error);
+        setError('Failed to load settings or teams data');
+        setSnackbar({
+          open: true,
+          message: 'Failed to load settings or teams data',
+          severity: 'error'
+        });
+      } finally {
+        setWorkItemLoading(false);
+        setLlmLoading(false);
+      }
+    };
+
+    loadInitialData();
+  }, []);
+
+  // Function to load teams for the current project
+  const loadTeams = async () => {
+    setLoadingTeams(true);
+    try {
+      const { organizationName, projectName } = await getOrganizationAndProject();
+      if (organizationName && projectName) {
+        const fetchedTeams = await getTeamsInProject(organizationName, projectName);
+        // Sort teams alphabetically
+        fetchedTeams.sort((a, b) => a.name.localeCompare(b.name));
+        setTeams(fetchedTeams);
+      } else {
+        throw new Error('Could not determine organization or project');
+      }
+    } catch (error) {
+      console.error('Failed to load teams:', error);
+      setError('Failed to load teams');
+    } finally {
+      setLoadingTeams(false);
+    }
+  };
+
+  // Filter teams based on search query
+  const filteredTeams = teams.filter(team => 
+    team.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  // Handler for LLM settings text field changes
+  const handleLlmInputChange = (field: keyof LlmSettings) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    setLlmSettings({
+      ...llmSettings,
+      [field]: event.target.value
+    });
+  };
+
+  // Handler for saving LLM settings
+  const saveLlmSettings = async () => {
+    setLlmSaving(true);
+    try {
+      await LlmSettingsService.saveSettings(llmSettings);
+      setSnackbar({
+        open: true,
+        message: 'Prompt settings saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving LLM settings:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save prompt settings',
+        severity: 'error'
+      });
+    } finally {
+      setLlmSaving(false);
+    }
+  };
+
+  // Handle adding a new team config
+  const handleAddTeam = () => {
+    if (!selectedTeam) return;
+    
+    // Check if team already has configuration
+    const existingConfig = workItemSettings.teamConfigs.find(
+      config => config.teamId === selectedTeam.id
+    );
+    
+    if (existingConfig) {
+      setSnackbar({
+        open: true,
+        message: 'This team already has a configuration',
+        severity: 'error'
+      });
+      return;
+    }
+    
+    // Create new config with default work item types
+    const newConfig: TeamWorkItemConfig = {
+      teamId: selectedTeam.id,
+      teamName: selectedTeam.name,
+      workItemTypes: WorkItemSettingsService.getDefaultWorkItemTypes()
+    };
+    
+    // Update settings
+    const updatedSettings = WorkItemSettingsService.addOrUpdateTeamConfig(
+      workItemSettings,
+      newConfig
+    );
+    
+    setWorkItemSettings(updatedSettings);
+    setSelectedTeam(null);
+    setAddDialogOpen(false);
+    
+    // Save the updated settings
+    saveWorkItemSettings(updatedSettings);
+  };
+
+  // Handle editing a team config
+  const handleEditTeam = () => {
+    if (!currentConfig) return;
+    
+    // Update the config with current work item types
+    const updatedConfig = {
+      ...currentConfig,
+      workItemTypes
+    };
+    
+    // Update settings
+    const updatedSettings = WorkItemSettingsService.addOrUpdateTeamConfig(
+      workItemSettings,
+      updatedConfig
+    );
+    
+    setWorkItemSettings(updatedSettings);
+    setCurrentConfig(null);
+    setWorkItemTypes([]);
+    setEditDialogOpen(false);
+    
+    // Save the updated settings
+    saveWorkItemSettings(updatedSettings);
+  };
+
+  // Handle deleting a team config
+  const handleDeleteTeam = () => {
+    if (!currentConfig) return;
+    
+    // Remove the config
+    const updatedSettings = WorkItemSettingsService.removeTeamConfig(
+      workItemSettings,
+      currentConfig.teamId
+    );
+    
+    setWorkItemSettings(updatedSettings);
+    setCurrentConfig(null);
+    setDeleteDialogOpen(false);
+    
+    // Save the updated settings
+    saveWorkItemSettings(updatedSettings);
+  };
+
+  // Open edit dialog for a team config
+  const openEditDialog = (config: TeamWorkItemConfig) => {
+    setCurrentConfig(config);
+    setWorkItemTypes([...config.workItemTypes]);
+    setEditDialogOpen(true);
+  };
+
+  // Open delete dialog for a team config
+  const openDeleteDialog = (config: TeamWorkItemConfig) => {
+    setCurrentConfig(config);
+    setDeleteDialogOpen(true);
+  };
+
+  // Handle work item type checkbox change
+  const handleWorkItemTypeChange = (index: number) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    const newWorkItemTypes = [...workItemTypes];
+    newWorkItemTypes[index].enabled = event.target.checked;
+    setWorkItemTypes(newWorkItemTypes);
+  };
+
+  // Save work item settings to backend
+  const saveWorkItemSettings = async (settingsToSave: WorkItemSettings) => {
+    setWorkItemSaving(true);
+    try {
+      await WorkItemSettingsService.saveSettings(settingsToSave);
+      setSnackbar({
+        open: true,
+        message: 'Mapping settings saved successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error saving work item settings:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to save mapping settings',
+        severity: 'error'
+      });
+    } finally {
+      setWorkItemSaving(false);
+    }
+  };
+
+  // Handle closing snackbar
+  const handleCloseSnackbar = () => {
+    setSnackbar({
+      ...snackbar,
+      open: false
+    });
+  };
+
+  // Show loading indicator while loading initial data
+  if (workItemLoading && llmLoading) {
+    return (
+      <Box p={3} display="flex" justifyContent="center" alignItems="center">
+        <CircularProgress size={40} />
+        <Typography ml={2}>Loading settings...</Typography>
+      </Box>
+    );
+  }
+
+  return (
+    <Box p={3}>
+      <Typography variant="h5" gutterBottom>
+        Work Item Settings
+      </Typography>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Work Item Type Mapping Section */}
+      <Paper elevation={2} sx={{ overflow: 'hidden', mb: 3 }}>
+        <Box 
+          onClick={toggleMappingExpanded} 
+          sx={{ 
+            p: 2, 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            cursor: 'pointer',
+            borderBottom: isMappingExpanded ? 1 : 0,
+            borderColor: 'divider'
+          }}
+        >
+          <Typography variant="h6">Work Item Type Mapping</Typography>
+          <IconButton size="small">
+            {isMappingExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          </IconButton>
+        </Box>
+        
+        <Collapse in={isMappingExpanded} timeout="auto">
+          <Box p={2}>
+            <Box display="flex" justifyContent="flex-end" mb={2}>
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<AddIcon />}
+                onClick={() => setAddDialogOpen(true)}
+                disabled={teams.length === 0}
+              >
+                Add Team Configuration
+              </Button>
+            </Box>
+            
+            <TableContainer>
+              <Table>
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Team Name</TableCell>
+                    <TableCell>Team ID</TableCell>
+                    <TableCell>Work Item Types</TableCell>
+                    <TableCell align="right">Actions</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {workItemSettings.teamConfigs.length > 0 ? (
+                    workItemSettings.teamConfigs.map((config) => (
+                      <TableRow key={config.teamId}>
+                        <TableCell>{config.teamName}</TableCell>
+                        <TableCell>{config.teamId}</TableCell>
+                        <TableCell>
+                          {config.workItemTypes
+                            .filter(type => type.enabled)
+                            .map(type => type.name)
+                            .join(', ')}
+                        </TableCell>
+                        <TableCell align="right">
+                          <Tooltip title="Edit">
+                            <IconButton onClick={() => openEditDialog(config)}>
+                              <EditIcon />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title="Delete">
+                            <IconButton onClick={() => openDeleteDialog(config)}>
+                              <DeleteIcon />
+                            </IconButton>
+                          </Tooltip>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell colSpan={4} align="center">
+                        <Typography variant="body2" color="textSecondary">
+                          No team configurations found. Click "Add Team Configuration" to get started.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Collapse>
+      </Paper>
+
+      {/* Work Item Prompts Section */}
+      <Paper elevation={2} sx={{ overflow: 'hidden', mb: 3 }}>
+        <Box 
+          onClick={togglePromptsExpanded} 
+          sx={{ 
+            p: 2, 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            cursor: 'pointer',
+            borderBottom: isPromptsExpanded ? 1 : 0,
+            borderColor: 'divider'
+          }}
+        >
+          <Typography variant="h6">Work Item Prompts</Typography>
+          <IconButton size="small">
+            {isPromptsExpanded ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+          </IconButton>
+        </Box>
+        
+        <Collapse in={isPromptsExpanded} timeout="auto">
+          <Box p={2}>
+            {!llmSettings.provider ? (
+              <Typography variant="body1" color="text.secondary" sx={{ fontStyle: 'italic', mb: 2 }}>
+                Please configure an AI provider in the LLM Settings tab before setting up work item prompts.
+              </Typography>
+            ) : (
+              <>
+                <TextField
+                  fullWidth
+                  multiline
+                  rows={6}
+                  label="Create Plan - System Prompt"
+                  variant="outlined"
+                  value={llmSettings.createWorkItemPlanSystemPrompt || ''}
+                  onChange={handleLlmInputChange('createWorkItemPlanSystemPrompt')}
+                  margin="normal"
+                  helperText="Define the instructions given to the AI for generating work item plans."
+                />
+                {/* Placeholder for additional prompt fields in the future */}
+              </>
+            )}
+            
+            <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+              <Button 
+                variant="contained" 
+                color="primary" 
+                onClick={saveLlmSettings}
+                disabled={llmSaving || !llmSettings.provider}
+              >
+                {llmSaving ? 'Saving Prompts...' : 'Save Prompts'}
+              </Button>
+            </Box>
+          </Box>
+        </Collapse>
+      </Paper>
+
+      {/* Add Team Dialog */}
+      <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Add Team Configuration</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Select a team to configure which work item types should be available.
+          </DialogContentText>
+          <Box sx={{ mt: 2 }}>
+            <Autocomplete
+              options={teams}
+              getOptionLabel={(option) => option.name}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Team"
+                  variant="outlined"
+                  fullWidth
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              )}
+              value={selectedTeam}
+              onChange={(_event, newValue) => setSelectedTeam(newValue)}
+              loading={loadingTeams}
+              loadingText="Loading teams..."
+              noOptionsText="No teams found"
+            />
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setAddDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleAddTeam}
+            color="primary"
+            variant="contained"
+            disabled={!selectedTeam || workItemSaving}
+          >
+            {workItemSaving ? <CircularProgress size={24} /> : 'Add'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Edit Team Dialog */}
+      <Dialog open={editDialogOpen} onClose={() => setEditDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Edit Team Configuration</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Configure which work item types should be available for {currentConfig?.teamName}.
+          </DialogContentText>
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              Work Item Types
+            </Typography>
+            <FormGroup>
+              {workItemTypes.map((type, index) => (
+                <FormControlLabel
+                  key={type.name}
+                  control={
+                    <Checkbox
+                      checked={type.enabled}
+                      onChange={handleWorkItemTypeChange(index)}
+                      name={type.name}
+                    />
+                  }
+                  label={type.name}
+                />
+              ))}
+            </FormGroup>
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleEditTeam}
+            color="primary"
+            variant="contained"
+            disabled={workItemSaving}
+          >
+            {workItemSaving ? <CircularProgress size={24} /> : 'Save Changes'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+        <DialogTitle>Delete Team Configuration</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Are you sure you want to delete the configuration for {currentConfig?.teamName}?
+            This action cannot be undone.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+          <Button
+            onClick={handleDeleteTeam}
+            color="error"
+            variant="contained"
+            disabled={workItemSaving}
+          >
+            {workItemSaving ? <CircularProgress size={24} /> : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Snackbar for notifications */}
+      <Snackbar open={snackbar.open} autoHideDuration={6000} onClose={handleCloseSnackbar}>
+        <Alert onClose={handleCloseSnackbar} severity={snackbar.severity} sx={{ width: '100%' }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
+    </Box>
+  );
+};
+
+// Default export is necessary for some import syntaxes
+export default WorkItemSettingsTab; 

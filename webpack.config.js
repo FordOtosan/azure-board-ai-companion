@@ -6,8 +6,7 @@ module.exports = {
     index: './src/pages/WorkItemFormPage.tsx',
     aibot: './src/pages/AiBotPage.tsx',
     chat: './src/pages/ChatPage.tsx',
-    settings: './src/pages/SettingsPage.tsx',
-    boardChat: './src/pages/BoardChatPage.tsx'
+    settings: './src/pages/SettingsPage.tsx'
   },
   output: {
     path: path.resolve(__dirname, 'dist'),
@@ -49,11 +48,6 @@ module.exports = {
       template: './src/pages/templates/settings.html',
       filename: 'settings.html',
       chunks: ['settings']
-    }),
-    new HtmlWebpackPlugin({
-      template: './src/pages/templates/boardChat.html',
-      filename: 'boardChat.html',
-      chunks: ['boardChat']
     })
   ]
 };

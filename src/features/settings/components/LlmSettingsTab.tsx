@@ -1,23 +1,75 @@
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import {
-    Alert,
-    Box,
-    Button,
-    FormControlLabel,
-    InputAdornment,
-    Paper,
-    Radio,
-    RadioGroup,
-    Slider,
-    Snackbar,
-    TextField,
-    Typography
+  Alert,
+  Box,
+  Button,
+  Collapse,
+  FormControlLabel,
+  IconButton,
+  InputAdornment,
+  Paper,
+  Radio,
+  RadioGroup,
+  Slider,
+  Snackbar,
+  TextField,
+  Typography
 } from '@mui/material';
 import * as React from 'react';
+import { Language } from '../../../translations';
 import { LlmSettings, LlmSettingsService } from '../services/LlmSettingsService';
 import '../styles/settings.css';
 import { LlmTestChat } from './LlmTestChat';
 
-export const LlmSettingsTab: React.FC = () => {
+// Define translations for the component
+const llmSettingsTranslations = {
+  en: {
+    title: "LLM Settings",
+    selectProvider: "Select AI Provider",
+    providerConfig: "Provider Configuration",
+    apiUrl: "API URL",
+    apiToken: "API Token",
+    temperature: "Temperature",
+    costPerMillion: "Cost per Million Tokens",
+    testIntegration: "Test LLM Integration",
+    workItemPlanPrompt: "Work Item Plan System Prompt",
+    promptGuide: "This system prompt guides the AI when creating a work item plan. It should include instructions on how to analyze user requests and format work items.",
+    saving: "Saving...",
+    saveSettings: "Save Settings",
+    loadingSettings: "Loading settings...",
+    saveSuccess: "Settings saved successfully",
+    saveError: "Failed to save settings",
+    loadError: "Failed to load settings"
+  },
+  tr: {
+    title: "LLM Ayarları",
+    selectProvider: "AI Sağlayıcı Seçin",
+    providerConfig: "Sağlayıcı Yapılandırması",
+    apiUrl: "API URL",
+    apiToken: "API Anahtarı",
+    temperature: "Sıcaklık",
+    costPerMillion: "Milyon Token Başına Maliyet",
+    testIntegration: "LLM Entegrasyonunu Test Et",
+    workItemPlanPrompt: "İş Öğesi Planı Sistem Komutu",
+    promptGuide: "Bu sistem komutu, iş öğesi planı oluştururken yapay zekaya rehberlik eder. Kullanıcı isteklerinin nasıl analiz edileceği ve iş öğelerinin nasıl biçimlendirileceği konusunda talimatlar içermelidir.",
+    saving: "Kaydediliyor...",
+    saveSettings: "Ayarları Kaydet",
+    loadingSettings: "Ayarlar yükleniyor...",
+    saveSuccess: "Ayarlar başarıyla kaydedildi",
+    saveError: "Ayarlar kaydedilemedi",
+    loadError: "Ayarlar yüklenemedi"
+  }
+};
+
+interface LlmSettingsTabProps {
+  currentLanguage: Language;
+}
+
+export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage }) => {
+  // Get translations for current language
+  const T = llmSettingsTranslations[currentLanguage];
+
   const [settings, setSettings] = React.useState<LlmSettings>({
     provider: null,
     apiUrl: '',
@@ -33,6 +85,7 @@ export const LlmSettingsTab: React.FC = () => {
     message: '',
     severity: 'success' as 'success' | 'error'
   });
+  const [isTestChatVisible, setIsTestChatVisible] = React.useState(false);
 
   React.useEffect(() => {
     const loadSettings = async () => {
@@ -43,7 +96,7 @@ export const LlmSettingsTab: React.FC = () => {
         console.error('Error loading settings:', error);
         setSnackbar({
           open: true,
-          message: 'Failed to load settings',
+          message: T.loadError,
           severity: 'error'
         });
       } finally {
@@ -52,13 +105,14 @@ export const LlmSettingsTab: React.FC = () => {
     };
 
     loadSettings();
-  }, []);
+  }, [T.loadError]);
 
   const handleProviderChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     setSettings({
       ...settings,
       provider: (event.target.value as LlmSettings['provider'])
     });
+    setIsTestChatVisible(false);
   };
 
   const handleInputChange = (field: keyof LlmSettings) => (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -89,14 +143,14 @@ export const LlmSettingsTab: React.FC = () => {
       await LlmSettingsService.saveSettings(settings);
       setSnackbar({
         open: true,
-        message: 'Settings saved successfully',
+        message: T.saveSuccess,
         severity: 'success'
       });
     } catch (error) {
       console.error('Error saving settings:', error);
       setSnackbar({
         open: true,
-        message: 'Failed to save settings',
+        message: T.saveError,
         severity: 'error'
       });
     } finally {
@@ -111,19 +165,23 @@ export const LlmSettingsTab: React.FC = () => {
     });
   };
 
+  const toggleTestChatVisibility = () => {
+    setIsTestChatVisible((prev) => !prev);
+  };
+
   if (loading) {
-    return <Box p={3}>Loading settings...</Box>;
+    return <Box p={3}>{T.loadingSettings}</Box>;
   }
 
   return (
     <Box p={3}>
       <Typography variant="h5" gutterBottom>
-        LLM Settings
+        {T.title}
       </Typography>
       
       <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          Select AI Provider
+          {T.selectProvider}
         </Typography>
         <RadioGroup
           name="provider-radio-group"
@@ -139,23 +197,23 @@ export const LlmSettingsTab: React.FC = () => {
       {settings.provider && (
         <Paper elevation={2} sx={{ p: 3, mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            Provider Configuration
+            {T.providerConfig}
           </Typography>
           <Box sx={{ mb: 3 }}>
             <TextField
               fullWidth
-              label="API URL"
+              label={T.apiUrl}
               variant="outlined"
               value={settings.apiUrl}
               onChange={handleInputChange('apiUrl')}
               margin="normal"
-              placeholder={settings.provider === 'azure-openai' ? 'https://your-resource-name.openai.azure.com/' : 
-                          settings.provider === 'openai' ? 'https://api.openai.com/' : 
-                          'https://generativelanguage.googleapis.com/'}
+              placeholder={settings.provider === 'azure-openai' ? 'https://<your-resource>.openai.azure.com/openai/deployments/<your-deployment>/chat/completions?api-version=YYYY-MM-DD' : 
+                          settings.provider === 'openai' ? 'https://api.openai.com/v1/chat/completions' : 
+                          'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent'}
             />
             <TextField
               fullWidth
-              label="API Token"
+              label={T.apiToken}
               variant="outlined"
               type="password"
               value={settings.apiToken}
@@ -165,7 +223,7 @@ export const LlmSettingsTab: React.FC = () => {
           </Box>
 
           <Typography gutterBottom>
-            Temperature: {settings.temperature.toFixed(1)}
+            {T.temperature}: {settings.temperature.toFixed(1)}
           </Typography>
           <Slider
             value={settings.temperature}
@@ -178,7 +236,7 @@ export const LlmSettingsTab: React.FC = () => {
           />
 
           <TextField
-            label="Cost per Million Tokens"
+            label={T.costPerMillion}
             variant="outlined"
             type="number"
             value={settings.costPerMillionTokens.toString()}
@@ -191,8 +249,33 @@ export const LlmSettingsTab: React.FC = () => {
         </Paper>
       )}
 
-      {settings.provider && <LlmTestChat settings={settings} />}
+      {/* Test LLM Integration */}
+      {settings.provider && (
+        <Paper elevation={1} sx={{ mt: 3, overflow: 'hidden' }}>
+          <Box 
+            onClick={toggleTestChatVisibility} 
+            sx={{ 
+              p: 2, 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              cursor: 'pointer',
+              borderBottom: isTestChatVisible ? 1 : 0,
+              borderColor: 'divider'
+            }}
+          >
+            <Typography variant="h6">{T.testIntegration}</Typography>
+            <IconButton size="small">
+              {isTestChatVisible ? <ExpandLessIcon /> : <ExpandMoreIcon />}
+            </IconButton>
+          </Box>
+          <Collapse in={isTestChatVisible} timeout="auto" unmountOnExit>
+            {isTestChatVisible && <LlmTestChat settings={settings} currentLanguage={currentLanguage} />}
+          </Collapse>
+        </Paper>
+      )}
 
+      {/* Save Button */}
       <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
         <Button 
           variant="contained" 
@@ -200,7 +283,7 @@ export const LlmSettingsTab: React.FC = () => {
           onClick={handleSaveSettings}
           disabled={saving || !settings.provider || !settings.apiUrl || !settings.apiToken}
         >
-          {saving ? 'Saving...' : 'Save Settings'}
+          {saving ? T.saving : T.saveSettings}
         </Button>
       </Box>
 

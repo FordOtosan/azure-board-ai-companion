@@ -1,18 +1,37 @@
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { SettingsHeader } from '../features/settings/components/SettingsHeader';
-import { TabNav, SettingsTab } from '../features/settings/components/TabNav';
-import { LlmSettingsTab } from '../features/settings/components/LlmSettingsTab';
-import { WorkItemPromptsTab } from '../features/settings/components/WorkItemPromptsTab';
-import { BoardPromptsTab } from '../features/settings/components/BoardPromptsTab';
 import { AssistantPromptsTab } from '../features/settings/components/AssistantPromptsTab';
+import { BoardPromptsTab } from '../features/settings/components/BoardPromptsTab';
+import { LlmSettingsTab } from '../features/settings/components/LlmSettingsTab';
+import { SettingsHeader } from '../features/settings/components/SettingsHeader';
+import { SettingsTab, TabNav } from '../features/settings/components/TabNav';
 import '../features/settings/styles/settings.css';
 import { AzureDevOpsSdkService } from '../services/sdk/AzureDevOpsSdkService';
+import { Language } from '../translations';
+
+// Lazy load the WorkItemSettingsTab
+const WorkItemSettingsTab = React.lazy(() => import('../features/settings/components/WorkItemSettingsTab'));
+
+// Define translations for the component
+const settingsPageTranslations = {
+  en: {
+    loading: "Loading...",
+    error: "Failed to initialize Azure DevOps SDK"
+  },
+  tr: {
+    loading: "Yükleniyor...",
+    error: "Azure DevOps SDK başlatılamadı"
+  }
+};
 
 const SettingsPage: React.FC = () => {
   const [initialized, setInitialized] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [selectedTab, setSelectedTab] = React.useState<SettingsTab>('llm');
+  const [currentLanguage, setCurrentLanguage] = React.useState<Language>('en');
+
+  // Get translations for current language
+  const T = settingsPageTranslations[currentLanguage];
 
   React.useEffect(() => {
     const initializeSdk = async () => {
@@ -21,25 +40,38 @@ const SettingsPage: React.FC = () => {
         setInitialized(true);
       } catch (err) {
         console.error('Failed to initialize SDK:', err);
-        setError('Failed to initialize Azure DevOps SDK');
+        setError(T.error);
       }
     };
 
     initializeSdk();
-  }, []);
+  }, [T.error]);
+
+  const handleLanguageChange = (
+    event: React.MouseEvent<HTMLElement> | null,
+    newLanguage: Language | null,
+  ) => {
+    if (newLanguage !== null) {
+      setCurrentLanguage(newLanguage);
+    }
+  };
 
   const renderTabContent = () => {
     switch (selectedTab) {
       case 'llm':
-        return <LlmSettingsTab />;
-      case 'workItem':
-        return <WorkItemPromptsTab />;
+        return <LlmSettingsTab currentLanguage={currentLanguage} />;
       case 'board':
-        return <BoardPromptsTab />;
+        return <BoardPromptsTab currentLanguage={currentLanguage} />;
       case 'assistant':
-        return <AssistantPromptsTab />;
+        return <AssistantPromptsTab currentLanguage={currentLanguage} />;
+      case 'workItemSettings':
+        return (
+          <React.Suspense fallback={<div>{T.loading}</div>}>
+            <WorkItemSettingsTab currentLanguage={currentLanguage} />
+          </React.Suspense>
+        );
       default:
-        return <LlmSettingsTab />;
+        return <LlmSettingsTab currentLanguage={currentLanguage} />;
     }
   };
 
@@ -48,16 +80,21 @@ const SettingsPage: React.FC = () => {
   }
 
   if (!initialized) {
-    return <div className="settings-loading">Loading...</div>;
+    return <div className="settings-loading">{T.loading}</div>;
   }
 
   return (
     <div className="settings-container">
-      <SettingsHeader />
-      <div className="settings-content">
-        <TabNav selectedTab={selectedTab} onSelectTab={setSelectedTab} />
-        {renderTabContent()}
-      </div>
+      <SettingsHeader 
+        currentLanguage={currentLanguage}
+        onLanguageChange={handleLanguageChange}
+      />
+      <TabNav 
+        selectedTab={selectedTab} 
+        onSelectTab={setSelectedTab} 
+        currentLanguage={currentLanguage}
+      />
+      {renderTabContent()}
     </div>
   );
 };

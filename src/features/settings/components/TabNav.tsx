@@ -1,15 +1,36 @@
+import { Box, Tab, Tabs } from '@mui/material';
 import * as React from 'react';
-import { Tabs, Tab, Box } from '@mui/material';
+import { Language } from '../../../translations';
 import '../styles/settings.css';
 
-export type SettingsTab = 'llm' | 'workItem' | 'board' | 'assistant';
+export type SettingsTab = 'llm' | 'board' | 'assistant' | 'workItemSettings';
+
+// Define translations for the component
+const tabNavTranslations = {
+  en: {
+    llmSettings: "LLM Settings",
+    boardPrompts: "Board Prompts",
+    assistantPrompts: "Assistant Prompts",
+    workItemSettings: "Work Item Settings"
+  },
+  tr: {
+    llmSettings: "LLM Ayarları",
+    boardPrompts: "Pano Komutları",
+    assistantPrompts: "Asistan Komutları",
+    workItemSettings: "İş Öğesi Ayarları"
+  }
+};
 
 interface TabNavProps {
   selectedTab: SettingsTab;
   onSelectTab: (tab: SettingsTab) => void;
+  currentLanguage: Language;
 }
 
-export const TabNav: React.FC<TabNavProps> = ({ selectedTab, onSelectTab }) => {
+export const TabNav: React.FC<TabNavProps> = ({ selectedTab, onSelectTab, currentLanguage }) => {
+  // Get translations for current language
+  const T = tabNavTranslations[currentLanguage];
+
   const handleChange = (_event: React.SyntheticEvent, newValue: SettingsTab) => {
     onSelectTab(newValue);
   };
@@ -22,10 +43,10 @@ export const TabNav: React.FC<TabNavProps> = ({ selectedTab, onSelectTab }) => {
         aria-label="settings tabs"
         variant="fullWidth"
       >
-        <Tab label="LLM Settings" value="llm" />
-        <Tab label="Work Item Prompts" value="workItem" />
-        <Tab label="Board Prompts" value="board" />
-        <Tab label="Assistant Prompts" value="assistant" />
+        <Tab label={T.llmSettings} value="llm" />
+        <Tab label={T.boardPrompts} value="board" />
+        <Tab label={T.assistantPrompts} value="assistant" />
+        <Tab label={T.workItemSettings} value="workItemSettings" />
       </Tabs>
     </Box>
   );

@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "fo-ai-assistant-multi",
   "publisher": "zaltunka",
-  "version": "1.8.0",
+  "version": "1.80.0",
   "name": "Fo AI Assistant Multi Model",
   "description": "AI-powered assistant for Azure Boards work items with expert software development analysis. Developed by Ford Otosan - Founited team",
   "categories": [
@@ -86,83 +86,12 @@
         "order": 99,
         "uri": "dist/settings.html"
       }
-    },
-    {
-      "id": "board-chat-panel",
-      "type": "ms.vss-work-web.board-view-menu",
-      "description": "AI Chat Assistant Panel",
-      "targets": [
-        "ms.vss-work-web.board-view-menu-item"
-      ],
-      "properties": {
-        "name": "AI Chat",
-        "uri": "dist/boardChat.html",
-        "height": 600,
-        "width": 400,
-        "title": "AI Chat Assistant"
-      }
-    },
-    {
-      "id": "board-chat-toolbar",
-      "type": "ms.vss-web.action",
-      "description": "AI Chat Assistant Panel",
-      "targets": [
-        "ms.vss-work-web.work-item-board-toolbar-menu",
-        "ms.vss-work-web.work-item-board-pivot-filter-menu"
-      ],
-      "properties": {
-        "text": "AI Chat",
-        "title": "AI Chat Assistant",
-        "icon": "img/extension-icon.png",
-        "uri": "dist/boardChat.html",
-        "registeredObjectId": "board-chat-object",
-        "height": 600,
-        "width": 400
-      }
-    },
-    {
-      "id": "board-chat-context-menu",
-      "type": "ms.vss-web.action-provider",
-      "description": "AI Chat Assistant in Board Context Menu",
-      "targets": [
-        "ms.vss-work-web.work-item-context-menu"
-      ],
-      "properties": {
-        "name": "AI Chat",
-        "registeredObjectId": "board-chat-context-menu",
-        "uri": "dist/boardChat.html",
-        "icon": {
-          "light": "img/extension-icon.png",
-          "dark": "img/extension-icon.png"
-        },
-        "text": "AI Chat",
-        "title": "AI Chat Assistant",
-        "group": "actions",
-        "height": 600,
-        "width": 400
-      }
-    },
-    {
-      "id": "board-chat-backlog-menu",
-      "type": "ms.vss-web.action",
-      "description": "AI Chat Assistant in Board Menu",
-      "targets": [
-        "ms.vss-work-web.backlog-board-actions"
-      ],
-      "properties": {
-        "text": "AI Chat",
-        "title": "AI Chat Assistant",
-        "icon": "img/extension-icon.png",
-        "uri": "dist/boardChat.html",
-        "registeredObjectId": "board-chat-backlog",
-        "height": 600,
-        "width": 400
-      }
     }
   ],
   "scopes": [
     "vso.work",
-    "vso.work_write"
+    "vso.work_write",
+    "vso.project"
   ],
   "contentSecurityPolicy": {
     "default-src": [
@@ -210,6 +139,10 @@
     "connect-src": [
       "'self'",
       "https://*.openai.azure.com",
+      "https://*.openai.com",
+      "https://api.openai.com",
+      "https://*.generativelanguage.googleapis.com",
+      "https://generativelanguage.googleapis.com",
       "https://*.visualstudio.com",
       "https://*.dev.azure.com",
       "https://*.vsassets.io",

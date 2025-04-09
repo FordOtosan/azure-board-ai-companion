@@ -1,9 +1,33 @@
 import { Box, Button, CircularProgress, Paper, TextField, Typography } from '@mui/material';
 import * as React from 'react';
+import { Language } from '../../../translations';
 import { LlmSettings } from '../services/LlmSettingsService'; // Assuming LlmSettings type is exported
+
+// Define translations for the component
+const llmTestChatTranslations = {
+  en: {
+    title: "Test LLM Integration",
+    inputPlaceholder: "Enter your test prompt here...",
+    send: "Send",
+    sending: "Sending...",
+    errorPrefix: "Error:",
+    unexpectedError: "An unexpected error occurred.",
+    apiCallError: "An unexpected error occurred during the API call."
+  },
+  tr: {
+    title: "LLM Entegrasyonunu Test Et",
+    inputPlaceholder: "Test komutunuzu buraya girin...",
+    send: "Gönder",
+    sending: "Gönderiliyor...",
+    errorPrefix: "Hata:",
+    unexpectedError: "Beklenmeyen bir hata oluştu.",
+    apiCallError: "API çağrısı sırasında beklenmeyen bir hata oluştu."
+  }
+};
 
 interface LlmTestChatProps {
   settings: LlmSettings;
+  currentLanguage?: Language; // Make it optional to maintain backward compatibility
 }
 
 interface Message {
@@ -137,7 +161,10 @@ const sendTestPrompt = async (settings: LlmSettings, prompt: string): Promise<st
 };
 
 
-export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings }) => {
+export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings, currentLanguage = 'en' }) => {
+  // Get translations for current language
+  const T = llmTestChatTranslations[currentLanguage];
+
   const [messages, setMessages] = React.useState<Message[]>([]);
   const [inputPrompt, setInputPrompt] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(false);
@@ -160,15 +187,13 @@ export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings }) => {
     setError(null);
 
     try {
-        // Use the placeholder function for now
       const response = await sendTestPrompt(settings, newPrompt);
       setMessages(prev => [...prev, { role: 'assistant', content: response }]);
     } catch (err: any) {
       console.error("Error sending test prompt:", err);
-      const errorMessage = err.message || 'An unexpected error occurred.';
+      const errorMessage = err.message || T.unexpectedError;
       setError(errorMessage);
-      // Display the error message from the API call attempt in the chat
-      setMessages(prev => [...prev, { role: 'assistant', content: `Error: ${errorMessage}` }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: `${T.errorPrefix} ${errorMessage}` }]);
     } finally {
       setIsLoading(false);
     }
@@ -177,7 +202,7 @@ export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings }) => {
   return (
     <Paper elevation={2} sx={{ p: 3, mt: 3 }}>
       <Typography variant="h6" gutterBottom>
-        Test LLM Integration
+        {T.title}
       </Typography>
       <Box sx={{ height: '300px', overflowY: 'auto', border: '1px solid #ccc', p: 2, mb: 2, borderRadius: '4px' }}>
         {messages.map((msg, index) => (
@@ -198,36 +223,27 @@ export const LlmTestChat: React.FC<LlmTestChatProps> = ({ settings }) => {
           </Box>
         ))}
         {isLoading && (
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', p: 2 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'center', mt: 2 }}>
             <CircularProgress size={24} />
-            <Typography sx={{ ml: 1 }}>Thinking...</Typography>
           </Box>
         )}
-         {error && (
-          <Typography color="error" sx={{ mt: 1, textAlign: 'center' }}>{error}</Typography>
-         )}
         <div ref={messagesEndRef} />
       </Box>
-      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+      <Box sx={{ display: 'flex', gap: 1 }}>
         <TextField
           fullWidth
-          variant="outlined"
-          placeholder="Enter your prompt here..."
           value={inputPrompt}
           onChange={(e) => setInputPrompt(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && !isLoading && handleSendPrompt()}
-          disabled={isLoading || !settings.provider || !settings.apiUrl || !settings.apiToken}
-          multiline
-          maxRows={4}
+          onKeyPress={(e) => e.key === 'Enter' && handleSendPrompt()}
+          placeholder={T.inputPlaceholder}
+          disabled={isLoading}
         />
         <Button
           variant="contained"
-          color="primary"
           onClick={handleSendPrompt}
-          disabled={isLoading || !inputPrompt.trim() || !settings.provider || !settings.apiUrl || !settings.apiToken}
-          sx={{ ml: 1 }}
+          disabled={!inputPrompt.trim() || isLoading}
         >
-          Send
+          {isLoading ? T.sending : T.send}
         </Button>
       </Box>
        {!settings.provider || !settings.apiUrl || !settings.apiToken ? (
