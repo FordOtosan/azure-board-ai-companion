@@ -64,7 +64,8 @@ const llmSettingsTranslations = {
     default: "Default",
     setAsDefault: "Set as Default",
     providerExists: "A model with this provider already exists",
-    nameRequired: "Model name is required"
+    nameRequired: "Model name is required",
+    nameExists: "A model with this name already exists"
   },
   tr: {
     title: "LLM Ayarları",
@@ -96,7 +97,8 @@ const llmSettingsTranslations = {
     default: "Varsayılan",
     setAsDefault: "Varsayılan Olarak Ayarla",
     providerExists: "Bu sağlayıcı için zaten bir model var",
-    nameRequired: "Model adı gereklidir"
+    nameRequired: "Model adı gereklidir",
+    nameExists: "Bu ad için zaten bir model var"
   }
 };
 
@@ -243,10 +245,11 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
       return;
     }
 
-    if (mode === 'add' && settings.configurations.some(c => c.provider === config.provider)) {
+    // Check for unique name instead of unique provider
+    if (mode === 'add' && settings.configurations.some(c => c.name?.toLowerCase() === config.name?.toLowerCase())) {
       setSnackbar({
         open: true,
-        message: T.providerExists,
+        message: T.nameExists,
         severity: 'error'
       });
       return;
@@ -418,7 +421,7 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
                   value={provider.value}
                   control={<Radio />}
                   label={provider.label}
-                  disabled={dialog.mode === 'edit' || settings.configurations.some(c => c.provider === provider.value)}
+                  disabled={dialog.mode === 'edit'}
                 />
               ))}
             </RadioGroup>

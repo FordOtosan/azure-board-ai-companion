@@ -86,47 +86,6 @@ export class LlmApiService {
    * system prompt, and expected output format
    */
   private static buildWorkItemPlanPrompt(userPrompt: string, systemPrompt: string, language: string): string {
-    // Output format example JSON
-    const outputFormatExample = 
-`**JSON:**
-\`\`\`json
-{
-  "items": [
-    {
-      "type": "Epic", // Or Feature/PBI/Bug if top-level isn't Epic
-      "title": "Epic/Work Item Title",
-      "description": "Description...",
-      "acceptanceCriteria": "- Criterion 1\\n- Criterion 2",
-      "priority": "1/2/3/4",
-      // storyPoints should NOT be here for Epics
-      "children": [
-        {
-          "type": "Feature", // Or PBI/Bug
-          "title": "Child Feature/PBI/Bug Title",
-          "description": "Description...",
-          "acceptanceCriteria": "- Criterion A\\n- Criterion B",
-          "priority": "1/2/3/4",
-          "storyPoints": "Number (e.g., 13)", // Feature/PBI/Bug get points (parent items points should match the sum of their child items points)
-          "children": [
-             {
-                "type": "Task",
-                "title": "Example Task Title",
-                "description": "Description...",
-                "acceptanceCriteria": "Defined in Parent PBI/Bug",
-                "priority": "1/2/3/4",
-                "storyPoints": "Number (e.g., 3)", // Task gets points
-                "originalEstimate": "Hours (e.g., 8)" // Task gets estimate
-             }
-             // ... other tasks
-          ]
-        }
-        // ... other children
-      ]
-    }
-    // ... other top-level items
-  ]
-}
-\`\`\``;
 
     // Language instruction: tell the model to respond in the selected language
     const languageInstruction = `Please provide your answers in ${language} language.`;
@@ -137,12 +96,9 @@ export class LlmApiService {
 
 ${systemPrompt}
 
-Here is the expected output format:
-${outputFormatExample}
-
 User request: ${userPrompt}
 
-IMPORTANT: Ensure your response includes valid JSON matching the format above.`;
+IMPORTANT: Ensure your response starts with ##PLAN##`;
 
     return fullPrompt;
   }
