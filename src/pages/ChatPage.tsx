@@ -1,4 +1,26 @@
-import { Box, Button, CircularProgress, Container, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
+import {
+    Assessment,
+    Error as ErrorIcon,
+    NoteAdd
+} from '@mui/icons-material';
+import {
+    Alert,
+    Box,
+    Button,
+    CircularProgress,
+    Container,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    Fade,
+    Paper,
+    Slide,
+    Snackbar,
+    Typography,
+    useTheme
+} from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import { WebApiTeam } from 'azure-devops-extension-api/Core'; // Restore team type import
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
@@ -49,6 +71,9 @@ const ChatPage: React.FC = () => {
   // Create a ref to store the streaming message ID to avoid race conditions
   const streamingMessageIdRef = React.useRef<string | number | null>(null);
 
+  // Theme for styling
+  const theme = useTheme();
+
   // Team State
   const [teams, setTeams] = React.useState<WebApiTeam[]>([]);
   const [isLoadingTeams, setIsLoadingTeams] = React.useState(true); // Start loading initially
@@ -84,6 +109,17 @@ const ChatPage: React.FC = () => {
   const [isCreatingWorkItems, setIsCreatingWorkItems] = React.useState(false);
   
   const [isWorkItemResultsOpen, setIsWorkItemResultsOpen] = React.useState(false);
+  
+  // Add notification state for user feedback
+  const [notification, setNotification] = React.useState<{
+    open: boolean;
+    message: string;
+    severity: 'success' | 'info' | 'warning' | 'error';
+  }>({
+    open: false,
+    message: '',
+    severity: 'info'
+  });
 
   React.useEffect(() => {
     // Initialize SDK, get Org/Project info, fetch Teams, and LLM Settings
@@ -742,7 +778,16 @@ const ChatPage: React.FC = () => {
     }
   };
 
-  // Function to handle starting a new conversation
+  // Add a helper function for showing notifications
+  const showNotification = (message: string, severity: 'success' | 'info' | 'warning' | 'error' = 'info') => {
+    setNotification({
+      open: true,
+      message,
+      severity
+    });
+  };
+  
+  // Enhance handleNewConversation with notification
   const handleNewConversation = () => {
     // Clear all messages except system/team context messages
     const systemMessages = messages.filter(m => 
@@ -772,6 +817,14 @@ const ChatPage: React.FC = () => {
     
     setIsLoadingResponse(false);
     setCanStopGeneration(false);
+    
+    // Show notification
+    showNotification(
+      currentLanguage === 'en' 
+        ? 'Started a new conversation' 
+        : 'Yeni bir konuşma başlatıldı',
+      'info'
+    );
   };
 
   // Count total work items in results (including children)
@@ -820,20 +873,61 @@ const ChatPage: React.FC = () => {
 
   if (!initialized) { // Simplified initial loading check
      return (
-       <Box display="flex" flexDirection="column" alignItems="center" justifyContent="center" height="100vh">
-         <CircularProgress />
-         <Typography ml={2} mt={2}>{T.initializing}</Typography> 
+       <Box 
+         display="flex" 
+         flexDirection="column" 
+         alignItems="center" 
+         justifyContent="center" 
+         height="100vh"
+         sx={{
+           backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0, 0, 0, 0.9)' : 'rgba(245, 245, 245, 0.9)',
+           backgroundImage: theme.palette.mode === 'dark' 
+             ? 'radial-gradient(circle at 25% 25%, rgba(53, 71, 125, 0.2) 0%, transparent 80%)' 
+             : 'radial-gradient(circle at 25% 25%, rgba(79, 119, 255, 0.1) 0%, transparent 80%)',
+         }}
+       >
+         <Paper 
+           elevation={4} 
+           sx={{
+             p: 4,
+             borderRadius: 2,
+             display: 'flex',
+             flexDirection: 'column',
+             alignItems: 'center',
+             gap: 3,
+             maxWidth: 400,
+             backgroundColor: theme.palette.background.paper,
+             boxShadow: theme.shadows[8]
+           }}
+         >
+           <CircularProgress size={60} thickness={4} />
+           <Typography variant="h5" fontWeight="500" align="center">{T.initializing}</Typography>
+           <Typography variant="body2" color="text.secondary" align="center">
+             {currentLanguage === 'en' 
+               ? 'Setting up your AI assistant and connecting to Azure DevOps...' 
+               : 'AI asistanınız ayarlanıyor ve Azure DevOps\'a bağlanıyor...'}
+           </Typography>
+         </Paper>
        </Box>
      );
   }
 
   return (
-    <Box className="chat-container" sx={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      height: '100vh',
-      overflow: 'hidden' // Prevent outer container from scrolling
-    }}>
+    <Box 
+      className="chat-container" 
+      sx={{ 
+        display: 'flex', 
+        flexDirection: 'column', 
+        height: '100vh',
+        overflow: 'hidden', // Prevent outer container from scrolling
+        backgroundColor: theme.palette.mode === 'dark' 
+          ? theme.palette.background.default
+          : '#f8f9fa',
+        backgroundImage: theme.palette.mode === 'dark' 
+          ? 'linear-gradient(to bottom, rgba(30, 30, 30, 0.8), rgba(20, 20, 20, 0.3))'
+          : 'linear-gradient(to bottom, rgba(250, 251, 252, 0.8), rgba(240, 242, 245, 0.3))',
+      }}
+    >
       <ChatHeader 
          organizationName={orgProjectInfo.organizationName}
          projectName={orgProjectInfo.projectName}
@@ -849,161 +943,262 @@ const ChatPage: React.FC = () => {
           sx={{ 
               flex: 1, 
               py: 0, 
-              px: 0, 
+              px: 2, // Add some horizontal padding
               display: 'flex',
               flexDirection: 'column',
               height: 'calc(100vh - 64px)', // Subtract header height
               overflow: 'hidden', // Hide container overflow
-              maxWidth: '100%' // Ensure container takes full width
+              maxWidth: {
+                xs: '100%', // Full width on mobile
+                sm: '100%', // Full width on tablet
+                md: '90%',  // 90% width on medium screens
+                lg: '85%',  // 85% width on large screens
+                xl: '80%'   // 80% width on extra large screens
+              },
+              mx: 'auto'   // Center the container
           }}
       >
           {/* Global loading overlay for JSON plan generation */}
           {isLoadingResponse && !streamingMessageId && (
-            <Box
-              sx={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 1300,
-              }}
-            >
+            <Fade in={true}>
               <Box
                 sx={{
-                  backgroundColor: 'background.paper',
-                  borderRadius: 2,
-                  p: 4,
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: alpha(theme.palette.background.paper, 0.7),
+                  backdropFilter: 'blur(5px)',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  boxShadow: 24,
-                  maxWidth: '80%',
-                  textAlign: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1300,
                 }}
               >
-                <CircularProgress size={60} thickness={4} />
-                <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
-                  {currentLanguage === 'en' 
-                    ? 'Creating detailed work item plan...'
-                    : 'Detaylı iş öğesi planı oluşturuluyor...'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {currentLanguage === 'en'
-                    ? 'Generating JSON structure based on the high-level plan'
-                    : 'Üst düzey plana dayalı JSON yapısı oluşturuluyor'}
-                </Typography>
+                <Paper
+                  elevation={3}
+                  sx={{
+                    backgroundColor: theme.palette.background.paper,
+                    borderRadius: 2,
+                    p: 4,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 2,
+                    boxShadow: theme.shadows[10],
+                    maxWidth: '90%',
+                    width: 400,
+                    textAlign: 'center',
+                    animation: 'pulse 2s infinite ease-in-out',
+                    '@keyframes pulse': {
+                      '0%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.4)}` },
+                      '70%': { boxShadow: `0 0 0 15px ${alpha(theme.palette.primary.main, 0)}` },
+                      '100%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0)}` }
+                    }
+                  }}
+                >
+                  <Box
+                    sx={{
+                      position: 'relative',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      m: 1
+                    }}
+                  >
+                    <CircularProgress 
+                      size={70} 
+                      thickness={3} 
+                      sx={{ 
+                        color: theme.palette.primary.main
+                      }} 
+                    />
+                    <Assessment
+                      sx={{
+                        position: 'absolute',
+                        fontSize: 30,
+                        color: theme.palette.primary.main
+                      }}
+                    />
+                  </Box>
+                  <Typography variant="h6" sx={{ fontWeight: 500, mt: 2 }}>
+                    {currentLanguage === 'en' 
+                      ? 'Creating detailed work item plan...'
+                      : 'Detaylı iş öğesi planı oluşturuluyor...'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {currentLanguage === 'en'
+                      ? 'Organizing tasks and generating a structured work breakdown'
+                      : 'Görevleri düzenleniyor ve yapılandırılmış bir iş dağılımı oluşturuluyor'}
+                  </Typography>
+                </Paper>
               </Box>
-            </Box>
+            </Fade>
           )}
           
           {/* Global loading overlay for work item creation */}
           {isCreatingWorkItems && (
-            <Box
-              sx={{
-                position: 'fixed',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: 'rgba(0, 0, 0, 0.6)',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 1400,
-              }}
-            >
+            <Fade in={true}>
               <Box
                 sx={{
-                  backgroundColor: 'background.paper',
-                  borderRadius: 2,
-                  p: 4,
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  backgroundColor: alpha(theme.palette.background.paper, 0.7),
+                  backdropFilter: 'blur(5px)',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'center',
-                  boxShadow: 24,
-                  maxWidth: '80%',
-                  textAlign: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1400,
                 }}
               >
-                <CircularProgress size={60} thickness={4} />
-                <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
-                  {currentLanguage === 'en' 
-                    ? 'Creating work items...'
-                    : 'İş öğeleri oluşturuluyor...'}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {currentLanguage === 'en'
-                    ? 'Creating work items in Azure DevOps'
-                    : 'Azure DevOps\'da iş öğeleri oluşturuluyor'}
-                </Typography>
+                <Paper
+                  elevation={3}
+                  sx={{
+                    backgroundColor: theme.palette.background.paper,
+                    borderRadius: 2,
+                    p: 4,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    gap: 2,
+                    boxShadow: theme.shadows[10],
+                    maxWidth: '90%',
+                    width: 400,
+                    textAlign: 'center',
+                    animation: 'pulse 2s infinite ease-in-out',
+                    '@keyframes pulse': {
+                      '0%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.4)}` },
+                      '70%': { boxShadow: `0 0 0 15px ${alpha(theme.palette.primary.main, 0)}` },
+                      '100%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0)}` }
+                    }
+                  }}
+                >
+                  <Box
+                    sx={{
+                      position: 'relative',
+                      display: 'flex',
+                      justifyContent: 'center',
+                      alignItems: 'center',
+                      m: 1
+                    }}
+                  >
+                    <CircularProgress 
+                      size={70} 
+                      thickness={3} 
+                      sx={{ 
+                        color: theme.palette.primary.main
+                      }} 
+                    />
+                    <NoteAdd
+                      sx={{
+                        position: 'absolute',
+                        fontSize: 30,
+                        color: theme.palette.primary.main
+                      }}
+                    />
+                  </Box>
+                  <Typography variant="h6" sx={{ fontWeight: 500, mt: 2 }}>
+                    {currentLanguage === 'en' 
+                      ? 'Creating work items...'
+                      : 'İş öğeleri oluşturuluyor...'}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {currentLanguage === 'en'
+                      ? 'Saving work items to Azure DevOps and establishing relationships'
+                      : 'İş öğeleri Azure DevOps\'a kaydediliyor ve ilişkiler kuruluyor'}
+                  </Typography>
+                </Paper>
               </Box>
-            </Box>
+            </Fade>
           )}
 
           {/* General Error Display */}
           {error && (
-             <Typography color="error" sx={{ p: 2, textAlign: 'center', flexShrink: 0 }}>
-                {T.errorInitializing}: {error}
-             </Typography>
+             <Alert 
+               severity="error" 
+               variant="filled"
+               sx={{ 
+                 m: 2, 
+                 borderRadius: 2,
+                 boxShadow: theme.shadows[3],
+                 display: 'flex',
+                 alignItems: 'center'
+               }}
+               icon={<ErrorIcon fontSize="inherit" />}
+             >
+               <Typography fontWeight="500">{T.errorInitializing}: {error}</Typography>
+             </Alert>
           )}
           
           {/* Chat Messages Area - Always visible */} 
-           <ChatMessages 
-                messages={messages}
-                currentLanguage={currentLanguage}
-                translations={translations}
-                workItemSysPrompt={workItemSysPrompt}
-                onUsePlan={(msg) => {
-                  // Get the message content
-                  const messageContent = msg.content || '';
-                  
-                  // Check if this is already a JSON plan
-                  const isJsonPlan = (() => {
-                    try {
-                      // Check if it has a code block with JSON
-                      const codeBlockMatch = messageContent.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
-                      if (codeBlockMatch && codeBlockMatch[1]) {
-                        const parsed = JSON.parse(codeBlockMatch[1]);
-                        return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+           <Paper
+             elevation={0}
+             sx={{
+               flex: 1, 
+               display: 'flex',
+               flexDirection: 'column',
+               borderRadius: 2,
+               bgcolor: 'background.paper',
+               overflow: 'hidden',
+               boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+               mt: 2
+             }}
+           >
+             <ChatMessages 
+                  messages={messages}
+                  currentLanguage={currentLanguage}
+                  translations={translations}
+                  workItemSysPrompt={workItemSysPrompt}
+                  onUsePlan={(msg) => {
+                    // Get the message content
+                    const messageContent = msg.content || '';
+                    
+                    // Check if this is already a JSON plan
+                    const isJsonPlan = (() => {
+                      try {
+                        // Check if it has a code block with JSON
+                        const codeBlockMatch = messageContent.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+                        if (codeBlockMatch && codeBlockMatch[1]) {
+                          const parsed = JSON.parse(codeBlockMatch[1]);
+                          return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+                        }
+                        
+                        // Try to see if the entire content is JSON
+                        if (messageContent.trim().startsWith('{') && messageContent.trim().endsWith('}')) {
+                          const parsed = JSON.parse(messageContent);
+                          return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+                        }
+                        
+                        return false;
+                      } catch (e) {
+                        return false;
                       }
-                      
-                      // Try to see if the entire content is JSON
-                      if (messageContent.trim().startsWith('{') && messageContent.trim().endsWith('}')) {
-                        const parsed = JSON.parse(messageContent);
-                        return parsed && parsed.workItems && Array.isArray(parsed.workItems);
-                      }
-                      
-                      return false;
-                    } catch (e) {
-                      return false;
+                    })();
+                    
+                    if (isJsonPlan) {
+                      // If it's already a JSON plan, directly open the form with that content
+                      setJsonPlan(messageContent);
+                      setIsWorkItemFormOpen(true);
+                      return;
                     }
-                  })();
-                  
-                  if (isJsonPlan) {
-                    // If it's already a JSON plan, directly open the form with that content
-                    setJsonPlan(messageContent);
-                    setIsWorkItemFormOpen(true);
-                    return;
-                  }
-                  
-                  // Otherwise, it's a high-level plan and we need to create a JSON plan
-                  // Set loading state globally (same as document upload)
-                  setIsLoadingResponse(true);
-                  setCanStopGeneration(true);
-                  
-                  // Get the plan content
-                  const planContent = messageContent;
-                  
-                  // Create the prompt for detailed JSON plan
-                  const jsonPrompt = `Based on the following high-level plan:
-                  
+                    
+                    // Otherwise, it's a high-level plan and we need to create a JSON plan
+                    // Set loading state globally (same as document upload)
+                    setIsLoadingResponse(true);
+                    setCanStopGeneration(true);
+                    
+                    // Get the plan content
+                    const planContent = messageContent;
+                    
+                    // Create the prompt for detailed JSON plan
+                    const jsonPrompt = `Based on the following high-level plan:
+                    
 ${planContent}
 
 Create a detailed JSON structure for work items that follows the Azure DevOps work item structure. 
@@ -1042,67 +1237,68 @@ Response format:
   ]
 }`;
 
-                  // Create new AbortController for this request
-                  abortControllerRef.current = new AbortController();
-                  
-                  // Call LLM service
-                  (async () => {
-                    try {
-                      // Add the prompt to history
-                      const newUserMessage: ChatMessage = { 
-                        role: 'user', 
-                        content: jsonPrompt
-                      };
-                      const updatedHistory = [...llmHistory, newUserMessage];
-                      setLlmHistory(updatedHistory);
-                      
-                      // Get response from LLM
-                      const response = await LlmApiService.sendPromptToLlm(
-                        currentLlm!, 
-                        jsonPrompt,
-                        updatedHistory
-                      );
-                      
-                      // Create a new message for the JSON response instead of updating loading message
-                      const jsonResponseMessage: Message = {
-                        id: Date.now(),
-                        role: 'assistant',
-                        content: response
-                      };
-                      
-                      // Add the response message to the chat
-                      setMessages(prev => [...prev, jsonResponseMessage]);
-                      
-                      // Store JSON plan for form
-                      setJsonPlan(response);
-                      
-                      // Open the work item form
-                      setIsWorkItemFormOpen(true);
-                      
-                      // Reset loading state
-                      setIsLoadingResponse(false);
-                      setCanStopGeneration(false);
-                      
-                    } catch (error) {
-                      console.error('Error generating detailed JSON:', error);
-                      
-                      // Create an error message
-                      const errorMessage: Message = {
-                        id: Date.now(),
-                        role: 'system',
-                        content: `Error creating detailed JSON plan: ${(error as Error).message || 'Unknown error'}`
-                      };
-                      
-                      // Add the error message to chat
-                      setMessages(prev => [...prev, errorMessage]);
-                      
-                      // Reset loading state
-                      setIsLoadingResponse(false);
-                      setCanStopGeneration(false);
-                    }
-                  })();
-                }}
-           />
+                    // Create new AbortController for this request
+                    abortControllerRef.current = new AbortController();
+                    
+                    // Call LLM service
+                    (async () => {
+                      try {
+                        // Add the prompt to history
+                        const newUserMessage: ChatMessage = { 
+                          role: 'user', 
+                          content: jsonPrompt
+                        };
+                        const updatedHistory = [...llmHistory, newUserMessage];
+                        setLlmHistory(updatedHistory);
+                        
+                        // Get response from LLM
+                        const response = await LlmApiService.sendPromptToLlm(
+                          currentLlm!, 
+                          jsonPrompt,
+                          updatedHistory
+                        );
+                        
+                        // Create a new message for the JSON response instead of updating loading message
+                        const jsonResponseMessage: Message = {
+                          id: Date.now(),
+                          role: 'assistant',
+                          content: response
+                        };
+                        
+                        // Add the response message to the chat
+                        setMessages(prev => [...prev, jsonResponseMessage]);
+                        
+                        // Store JSON plan for form
+                        setJsonPlan(response);
+                        
+                        // Open the work item form
+                        setIsWorkItemFormOpen(true);
+                        
+                        // Reset loading state
+                        setIsLoadingResponse(false);
+                        setCanStopGeneration(false);
+                        
+                      } catch (error) {
+                        console.error('Error generating detailed JSON:', error);
+                        
+                        // Create an error message
+                        const errorMessage: Message = {
+                          id: Date.now(),
+                          role: 'system',
+                          content: `Error creating detailed JSON plan: ${(error as Error).message || 'Unknown error'}`
+                        };
+                        
+                        // Add the error message to chat
+                        setMessages(prev => [...prev, errorMessage]);
+                        
+                        // Reset loading state
+                        setIsLoadingResponse(false);
+                        setCanStopGeneration(false);
+                      }
+                    })();
+                  }}
+             />
+           </Paper>
 
           {/* Work Item Form Dialog */}
           <Dialog
@@ -1113,11 +1309,15 @@ Response format:
             PaperProps={{
               sx: { 
                 maxHeight: '90vh',
-                height: '90vh'
+                height: '90vh',
+                borderRadius: 2,
+                overflow: 'hidden',
+                boxShadow: theme.shadows[10]
               }
             }}
+            TransitionComponent={Slide}
           >
-            <DialogContent>
+            <DialogContent sx={{ p: 0 }}>
               {jsonPlan && (
                 <WorkItemForm
                   jsonPlan={jsonPlan}
@@ -1127,6 +1327,12 @@ Response format:
                   teamMapping={teamMapping}
                   onSubmit={async (workItems) => {
                     if (!selectedTeam || !orgProjectInfo.projectName) {
+                      showNotification(
+                        currentLanguage === 'en' 
+                          ? 'Error: Team or project information is missing' 
+                          : 'Hata: Takım veya proje bilgisi eksik',
+                        'error'
+                      );
                       return;
                     }
                     
@@ -1157,6 +1363,14 @@ Response format:
                       // Add success message to chat
                       setMessages(prev => [...prev, successMessage]);
                       
+                      // Show notification
+                      showNotification(
+                        currentLanguage === 'en' 
+                          ? `Successfully created ${totalItems} work items` 
+                          : `${totalItems} iş öğesi başarıyla oluşturuldu`,
+                        'success'
+                      );
+                      
                       // Close form
                       setIsWorkItemFormOpen(false);
                       
@@ -1176,6 +1390,14 @@ Response format:
                       
                       // Add error message to chat
                       setMessages(prev => [...prev, errorMessage]);
+                      
+                      // Show notification
+                      showNotification(
+                        currentLanguage === 'en' 
+                          ? `Error creating work items: ${(error as Error).message || 'Unknown error'}` 
+                          : `İş öğelerini oluştururken hata: ${(error as Error).message || 'Bilinmeyen hata'}`,
+                        'error'
+                      );
                     } finally {
                       // Reset creating state
                       setIsCreatingWorkItems(false);
@@ -1192,62 +1414,171 @@ Response format:
             onClose={() => setIsWorkItemResultsOpen(false)}
             maxWidth="md"
             fullWidth
+            PaperProps={{
+              sx: { 
+                borderRadius: 2,
+                overflow: 'hidden',
+                boxShadow: theme.shadows[10]
+              }
+            }}
           >
-            <DialogTitle>
-              {currentLanguage === 'en' ? 'Work Items Created' : 'Oluşturulan İş Öğeleri'}
+            <DialogTitle sx={{ 
+              bgcolor: theme.palette.success.main, 
+              color: 'white',
+              py: 2
+            }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <NoteAdd />
+                {currentLanguage === 'en' ? 'Work Items Created' : 'Oluşturulan İş Öğeleri'}
+              </Box>
             </DialogTitle>
             <DialogContent>
               {creationResults && (
                 <Box sx={{ mt: 2 }}>
-                  {renderWorkItemResults(creationResults)}
+                  <Typography variant="subtitle2" color="text.secondary" gutterBottom>
+                    {currentLanguage === 'en' 
+                      ? `${countWorkItems(creationResults)} work items were successfully created in Azure DevOps` 
+                      : `Azure DevOps'da ${countWorkItems(creationResults)} iş öğesi başarıyla oluşturuldu`}
+                  </Typography>
+                  <Box sx={{ 
+                    maxHeight: '50vh',
+                    overflow: 'auto',
+                    mt: 2,
+                    bgcolor: theme.palette.background.default,
+                    p: 2,
+                    borderRadius: 1
+                  }}>
+                    {renderWorkItemResults(creationResults)}
+                  </Box>
                 </Box>
               )}
             </DialogContent>
-            <DialogActions>
-              <Button onClick={() => setIsWorkItemResultsOpen(false)}>
+            <DialogActions sx={{ px: 3, py: 2 }}>
+              <Button 
+                onClick={() => setIsWorkItemResultsOpen(false)}
+                variant="contained"
+                color="primary"
+              >
                 {currentLanguage === 'en' ? 'Close' : 'Kapat'}
               </Button>
             </DialogActions>
           </Dialog>
 
-          {/* Conditional Bottom Area: Load Buttons / Loader / Team Selector / Chat Input */} 
+          {/* Conditional Bottom Area: Team Selector / Action Selector / Chat Input */} 
            <Box sx={{ 
              mt: 'auto', 
              flexShrink: 0, 
-             borderTop: 1, 
-             borderColor: 'divider',
-             bgcolor: 'background.paper', // Ensure bottom area has solid background
-             position: 'relative', // For proper stacking
-             zIndex: 1 // Ensure it stays above content
+             bgcolor: 'background.paper',
+             borderRadius: '16px 16px 0 0',
+             boxShadow: '0 -4px 20px rgba(0,0,0,0.06)',
+             p: 2,
+             position: 'relative',
+             zIndex: 2
            }}> 
               {/* Show loading indicator for teams */} 
               {isLoadingTeams && (
-                 <Box sx={{ p: 2, textAlign: 'center' }}><CircularProgress size={24} /></Box> 
+                 <Box sx={{ 
+                   p: 4, 
+                   textAlign: 'center',
+                   display: 'flex',
+                   alignItems: 'center',
+                   justifyContent: 'center',
+                   flexDirection: 'column',
+                   gap: 2
+                 }}>
+                   <CircularProgress size={40} thickness={4} />
+                   <Typography variant="h6">
+                     {currentLanguage === 'en' ? 'Loading teams...' : 'Takımlar yükleniyor...'}
+                   </Typography>
+                 </Box> 
               )}
               
               {/* Show Team Selector if loaded, not loading, no error, and no team selected */} 
               {teamsLoaded && !isLoadingTeams && !teamError && !selectedTeam && teams.length > 0 && (
-                  <TeamSelector 
+                  <Box 
+                    sx={{ 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      p: 3,
+                      gap: 3,
+                      textAlign: 'center'
+                    }}
+                  >
+                    <Typography variant="h5" fontWeight="medium">
+                      {currentLanguage === 'en' 
+                        ? 'Select a team to get started' 
+                        : 'Başlamak için bir takım seçin'}
+                    </Typography>
+                    
+                    <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 600, mb: 2 }}>
+                      {currentLanguage === 'en' 
+                        ? 'Choose a team to view and create work items. Your AI assistant will help you generate plans and tasks based on your requirements.' 
+                        : 'İş öğelerini görüntülemek ve oluşturmak için bir takım seçin. AI asistanınız, gereksinimlerinize göre planlar ve görevler oluşturmanıza yardımcı olacaktır.'}
+                    </Typography>
+                    
+                    <TeamSelector 
                       teams={teams} 
                       onSelectTeam={handleTeamSelect} 
                       currentLanguage={currentLanguage}
-                  />
+                    />
+                  </Box>
               )}
 
               {/* Show team error message if not loading */} 
               {teamError && !isLoadingTeams && (
-                  <Typography sx={{ p: 2, textAlign: 'center', color: 'error' }}>
-                      {teamError}
-                  </Typography> 
+                  <Alert 
+                    severity="error" 
+                    variant="filled" 
+                    sx={{ 
+                      m: 2, 
+                      borderRadius: 2,
+                      boxShadow: theme.shadows[3]
+                    }}
+                  >
+                    <Typography fontWeight="500">{teamError}</Typography>
+                  </Alert>
               )}
 
               {/* Show Action Selector if team selected but no action chosen */} 
               {selectedTeam && !selectedAction && (
-                 <ActionSelector 
+                <Box 
+                  sx={{ 
+                    display: 'flex', 
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    p: 3,
+                    gap: 3,
+                    textAlign: 'center'
+                  }}
+                >
+                  <Typography variant="h5" fontWeight="medium">
+                    {currentLanguage === 'en' 
+                      ? `What would you like to do with ${selectedTeam.name}?` 
+                      : `${selectedTeam.name} takımıyla ne yapmak istersiniz?`}
+                  </Typography>
+                  
+                  <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 600, mb: 2 }}>
+                    {currentLanguage === 'en' 
+                      ? 'Select an action to continue. You can create work items or discuss sprint planning with the AI assistant.' 
+                      : 'Devam etmek için bir eylem seçin. AI asistanı ile iş öğeleri oluşturabilir veya sprint planlaması yapabilirsiniz.'}
+                  </Typography>
+                  
+                  <ActionSelector 
                     selectedTeam={selectedTeam} 
                     onSelectAction={handleActionSelect} 
                     currentLanguage={currentLanguage}
-                 />
+                  />
+                  
+                  <Button 
+                    variant="text" 
+                    color="primary" 
+                    onClick={handleChangeTeamRequest}
+                    sx={{ mt: 2 }}
+                  >
+                    {currentLanguage === 'en' ? 'Change Team' : 'Takımı Değiştir'}
+                  </Button>
+                </Box>
               )}
 
               {/* Show Chat Input if team AND action 'create_wi' are selected */} 
@@ -1267,6 +1598,22 @@ Response format:
                  />
               )}
            </Box>
+
+          {/* Add Snackbar for notifications */}
+          <Snackbar
+            open={notification.open}
+            autoHideDuration={5000}
+            onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+            anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+          >
+            <Alert 
+              severity={notification.severity} 
+              variant="filled"
+              onClose={() => setNotification(prev => ({ ...prev, open: false }))}
+            >
+              {notification.message}
+            </Alert>
+          </Snackbar>
       </Container>
     </Box>
   );

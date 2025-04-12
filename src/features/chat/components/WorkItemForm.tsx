@@ -1141,64 +1141,67 @@ IMPORTANT: Provide ONLY the acceptance criteria as a numbered list without expla
                 />
               </Box>
               
-              <Box sx={{ mb: 3 }}>
-                <Box sx={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  mb: 1,
-                  bgcolor: theme.palette.background.default,
-                  borderRadius: '4px',
-                  p: 1
-                }}>
-                  <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', fontWeight: 600 }}>
-                    <AcceptanceIcon fontSize="small" sx={{ mr: 1, color: theme.palette.text.secondary }} />
-                    {T.acceptanceCriteria}
-                  </Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <Tooltip title={T.refineAcceptanceCriteria}>
-                    <IconButton
-                      size="small"
-                      color="primary"
-                      disabled={isAcceptanceCriteriaLoading}
-                      onClick={() => refineField(pathString, 'acceptanceCriteria', item.acceptanceCriteria || '')}
-                      sx={{ 
-                        height: 32, 
-                        width: 32,
-                        bgcolor: theme.palette.mode === 'light' ? 'rgba(25, 118, 210, 0.08)' : 'rgba(25, 118, 210, 0.15)',
-                        '&:hover': {
-                          bgcolor: theme.palette.mode === 'light' ? 'rgba(25, 118, 210, 0.12)' : 'rgba(25, 118, 210, 0.25)'
+              {/* Only render acceptance criteria field if the work item type supports it */}
+              {(supportsAcceptanceCriteria || !teamMapping) && (
+                <Box sx={{ mb: 3 }}>
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    mb: 1,
+                    bgcolor: theme.palette.background.default,
+                    borderRadius: '4px',
+                    p: 1
+                  }}>
+                    <Typography variant="subtitle2" sx={{ display: 'flex', alignItems: 'center', fontWeight: 600 }}>
+                      <AcceptanceIcon fontSize="small" sx={{ mr: 1, color: theme.palette.text.secondary }} />
+                      {T.acceptanceCriteria}
+                    </Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Tooltip title={T.refineAcceptanceCriteria}>
+                      <IconButton
+                        size="small"
+                        color="primary"
+                        disabled={isAcceptanceCriteriaLoading}
+                        onClick={() => refineField(pathString, 'acceptanceCriteria', item.acceptanceCriteria || '')}
+                        sx={{ 
+                          height: 32, 
+                          width: 32,
+                          bgcolor: theme.palette.mode === 'light' ? 'rgba(25, 118, 210, 0.08)' : 'rgba(25, 118, 210, 0.15)',
+                          '&:hover': {
+                            bgcolor: theme.palette.mode === 'light' ? 'rgba(25, 118, 210, 0.12)' : 'rgba(25, 118, 210, 0.25)'
+                          }
+                        }}
+                      >
+                        {isAcceptanceCriteriaLoading ? (
+                          <CircularProgress size={16} />
+                        ) : (
+                          <RefineIcon fontSize="small" />
+                        )}
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
+                  <TextField
+                    fullWidth
+                    multiline
+                    rows={4}
+                    value={item.acceptanceCriteria || ''}
+                    onChange={(e) => {
+                      const updatedItem = { ...item, acceptanceCriteria: e.target.value };
+                      const newWorkItems = updateWorkItemAtPath(workItems, path, updatedItem);
+                      setWorkItems(newWorkItems);
+                    }}
+                    variant="outlined"
+                    placeholder={T.acceptanceCriteria}
+                    sx={{
+                      '& .MuiOutlinedInput-root': {
+                        '& fieldset': {
+                          borderColor: theme.palette.divider
                         }
-                      }}
-                    >
-                      {isAcceptanceCriteriaLoading ? (
-                        <CircularProgress size={16} />
-                      ) : (
-                        <RefineIcon fontSize="small" />
-                      )}
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-                <TextField
-                  fullWidth
-                  multiline
-                  rows={4}
-                  value={item.acceptanceCriteria || ''}
-                  onChange={(e) => {
-                    const updatedItem = { ...item, acceptanceCriteria: e.target.value };
-                    const newWorkItems = updateWorkItemAtPath(workItems, path, updatedItem);
-                    setWorkItems(newWorkItems);
-                  }}
-                  variant="outlined"
-                  placeholder={T.acceptanceCriteria}
-                  sx={{
-                    '& .MuiOutlinedInput-root': {
-                      '& fieldset': {
-                        borderColor: theme.palette.divider
                       }
-                    }
-                  }}
-                />
-              </Box>
+                    }}
+                  />
+                </Box>
+              )}
               
               <Box sx={{ mb: 3 }}>
                 <Box sx={{ 
