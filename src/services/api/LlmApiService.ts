@@ -1,4 +1,5 @@
 import { LlmConfig, LlmSettings } from '../../features/settings/services/LlmSettingsService';
+import { TeamWorkItemConfig, WorkItemFieldConfig, WorkItemTypeConfig } from '../../features/settings/services/WorkItemSettingsService';
 
 // Define the JSON response format for work item plans
 export interface WorkItemPlanResponse {
@@ -21,12 +22,86 @@ export type StreamChunkCallback = (chunk: string) => void;
 export type StreamCompleteCallback = (fullResponse: string) => void;
 export type StreamErrorCallback = (error: Error) => void;
 
+// Add new interface for chat messages
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+}
+
 /**
  * Service for handling LLM API calls
  */
 export class LlmApiService {
   private static getDefaultConfig(settings: LlmSettings): LlmConfig | null {
     return settings.configurations.find(config => config.isDefault) || settings.configurations[0] || null;
+  }
+
+  /**
+   * Builds a complete work item plan prompt combining language instruction,
+   * system prompt, and expected output format
+   */
+  private static buildWorkItemPlanPrompt(
+    userPrompt: string, 
+    systemPrompt: string, 
+    language: string,
+    teamConfig?: TeamWorkItemConfig | null
+  ): string {
+    // Language instruction: tell the model to respond in the selected language
+    const languageInstruction = `Please provide your response in ${language} language.`;
+
+    // Add work item type and field information if available
+    let workItemTypeInfo = '';
+    if (teamConfig) {
+      const enabledTypes = teamConfig.workItemTypes.filter((t: WorkItemTypeConfig) => t.enabled);
+      workItemTypeInfo = `
+Available work item types and their fields for this team:
+${enabledTypes.map((type: WorkItemTypeConfig) => `
+- ${type.name}:
+  Fields: ${type.fields.filter((f: WorkItemFieldConfig) => f.enabled).map((f: WorkItemFieldConfig) => f.displayName).join(', ')}`).join('\n')}
+
+Please consider these work item types and their available fields when creating the plan. Only use the work item types and fields listed above.`;
+    }
+
+    // Combine all parts into a full prompt with clear instructions
+    const fullPrompt = 
+`${languageInstruction}
+
+${systemPrompt}
+
+${workItemTypeInfo}
+
+User request: ${userPrompt}
+
+IMPORTANT INSTRUCTIONS:
+1. Start your response with ##PLAN## on a new line
+2. After ##PLAN##, provide a detailed work item plan that includes:
+   - A brief overview of the plan
+   - Individual work items with their type, title, description, and other relevant fields
+   - Clear parent-child relationships between items
+   - Priority levels and time estimates where appropriate
+3. Format each work item clearly with headers and proper spacing
+4. Use the available work item types and fields as specified above
+5. Make sure each work item has concrete, actionable details
+
+Example format:
+##PLAN##
+Overview: [Brief description of the overall plan]
+
+Epic: [Title]
+Description: [Detailed description]
+Acceptance Criteria: [Clear criteria]
+Priority: [Priority level]
+
+  Feature: [Title] (Child of above Epic)
+  Description: [Detailed description]
+  Priority: [Priority level]
+  Story Points: [Estimate]
+
+    Task: [Title] (Child of above Feature)
+    Description: [Specific task details]
+    Original Estimate: [Time estimate]`;
+
+    return fullPrompt;
   }
 
   /**
@@ -39,7 +114,8 @@ export class LlmApiService {
   static async createWorkItemPlan(
     settings: LlmSettings,
     prompt: string,
-    language: string
+    language: string,
+    teamConfig?: TeamWorkItemConfig | null
   ): Promise<string> {
     const config = this.getDefaultConfig(settings);
     if (!config) {
@@ -47,10 +123,10 @@ export class LlmApiService {
     }
 
     // Create the full prompt with all three parts
-    const fullPrompt = this.buildWorkItemPlanPrompt(prompt, settings.createWorkItemPlanSystemPrompt || '', language);
+    const fullPrompt = this.buildWorkItemPlanPrompt(prompt, settings.createWorkItemPlanSystemPrompt || '', language, teamConfig);
     
     // Send the prompt to the LLM API
-    const response = await this.sendPromptToLlm(config, fullPrompt);
+    const response = await this.sendPromptToLlm(config, fullPrompt, []);
     return response;
   }
 
@@ -65,7 +141,9 @@ export class LlmApiService {
     onComplete: StreamCompleteCallback,
     onError: StreamErrorCallback,
     config?: LlmConfig | null,
-    abortController?: AbortController
+    abortController?: AbortController,
+    teamConfig?: TeamWorkItemConfig | null,
+    messageHistory: ChatMessage[] = []
   ): void {
     // Use provided config or fall back to default if not provided
     const llmConfig = config || this.getDefaultConfig(settings);
@@ -75,38 +153,30 @@ export class LlmApiService {
     }
 
     // Create the full prompt with all three parts
-    const fullPrompt = this.buildWorkItemPlanPrompt(prompt, settings.createWorkItemPlanSystemPrompt || '', language);
+    const fullPrompt = this.buildWorkItemPlanPrompt(prompt, settings.createWorkItemPlanSystemPrompt || '', language, teamConfig);
     
-    // Stream the prompt to the LLM API with abort controller
-    this.streamPromptToLlm(llmConfig, fullPrompt, onChunk, onComplete, onError, abortController);
-  }
+    // Add the system prompt to the history if it's not already there
+    const systemPrompt = settings.createWorkItemPlanSystemPrompt || '';
+    const historyWithSystem: ChatMessage[] = messageHistory.length === 0 && systemPrompt
+      ? [{ role: 'system' as const, content: systemPrompt }, ...messageHistory]
+      : messageHistory;
 
-  /**
-   * Builds a complete work item plan prompt combining language instruction,
-   * system prompt, and expected output format
-   */
-  private static buildWorkItemPlanPrompt(userPrompt: string, systemPrompt: string, language: string): string {
-
-    // Language instruction: tell the model to respond in the selected language
-    const languageInstruction = `Please provide your answers in ${language} language.`;
-
-    // Combine all parts into a full prompt
-    const fullPrompt = 
-`${languageInstruction}
-
-${systemPrompt}
-
-User request: ${userPrompt}
-
-IMPORTANT: Ensure your response starts with ##PLAN##`;
-
-    return fullPrompt;
+    // Stream the prompt to the LLM API with abort controller and history
+    this.streamPromptToLlm(
+      llmConfig, 
+      fullPrompt, 
+      onChunk, 
+      onComplete, 
+      onError, 
+      abortController,
+      historyWithSystem
+    );
   }
 
   /**
    * Sends a prompt to the LLM API based on the provider configured in settings
    */
-  static async sendPromptToLlm(config: LlmConfig, prompt: string): Promise<string> {
+  static async sendPromptToLlm(config: LlmConfig, prompt: string, messageHistory: ChatMessage[] = []): Promise<string> {
     console.log('Sending prompt to LLM:', { provider: config.provider });
 
     if (!config.provider || !config.apiUrl || !config.apiToken) {
@@ -121,57 +191,137 @@ IMPORTANT: Ensure your response starts with ##PLAN##`;
 
     try {
       if (config.provider === 'azure-openai' || config.provider === 'openai') {
+        // Split the prompt to separate system instructions from user request
+        const promptParts = prompt.split('User request:');
+        const systemInstructions = promptParts[0].trim();
+        const userRequest = promptParts[1]?.trim() || prompt.trim();
+
+        let messages = [];
+        if (messageHistory.length > 0) {
+          // Use existing message history if provided
+          messages = [...messageHistory];
+          // Add user request as the last message if not already there
+          if (messages.length === 0 || messages[messages.length - 1].role !== 'user') {
+            messages.push({ role: 'user', content: userRequest });
+          }
+        } else {
+          // Default format without history
+          messages = [
+            { role: 'system', content: systemInstructions },
+            { role: 'user', content: userRequest }
+          ];
+        }
+
         requestBody = JSON.stringify({
-          messages: [{ role: 'user', content: prompt }],
+          messages: messages,
           temperature: config.temperature ?? 0.7,
           max_tokens: 4000 // Increased for longer responses
         });
         
         if (config.provider === 'azure-openai') {
-            headers['api-key'] = config.apiToken;
-            if (!requestUrl.includes('api-version=')) {
-                const separator = requestUrl.includes('?') ? '&' : '?';
-                requestUrl += `${separator}api-version=2023-07-01-preview`; 
-                console.warn("Azure OpenAI API version not found in URL, appending default");
-            }
+          headers['api-key'] = config.apiToken;
+          if (!requestUrl.includes('api-version=')) {
+            const separator = requestUrl.includes('?') ? '&' : '?';
+            requestUrl += `${separator}api-version=2023-07-01-preview`; 
+            console.warn("Azure OpenAI API version not found in URL, appending default");
+          }
         } else { // openai
-            headers['Authorization'] = `Bearer ${config.apiToken}`;
-            if (!requestUrl.endsWith('/v1/chat/completions')) {
-                if (!requestUrl.endsWith('/')) {
-                    requestUrl += '/';
-                }
-                requestUrl += 'v1/chat/completions';
+          headers['Authorization'] = `Bearer ${config.apiToken}`;
+          if (!requestUrl.endsWith('/v1/chat/completions')) {
+            if (!requestUrl.endsWith('/')) {
+              requestUrl += '/';
             }
+            requestUrl += 'v1/chat/completions';
+          }
+        }
+      } else if (config.provider === 'gemini') {
+        headers['x-goog-api-key'] = config.apiToken;
+
+        if (!requestUrl.includes(':generateContent')) {
+          if (!requestUrl.endsWith('/')) {
+            requestUrl += '/';
+          }
+          if (!requestUrl.includes('/models/')) {
+            requestUrl += 'v1beta/models/gemini-pro:generateContent'; 
+            console.warn("Gemini model not found in URL, assuming 'gemini-pro'");
+          } else if (!requestUrl.includes(':generateContent')) {
+            requestUrl += ':generateContent';
+          }
         }
 
-      } else if (config.provider === 'gemini') {
-          headers['x-goog-api-key'] = config.apiToken;
-
-          if (!requestUrl.includes(':generateContent')) {
-              if (!requestUrl.endsWith('/')) {
-                  requestUrl += '/';
+        // Process message history for Gemini to ensure only one system message
+        let formattedContents: any[] = [];
+        let hasSystemMessage = false;
+        
+        if (messageHistory.length > 0) {
+          // Handle message history for Gemini
+          messageHistory.forEach(msg => {
+            if (msg.role === 'system') {
+              if (!hasSystemMessage) {
+                formattedContents.push({
+                  role: 'user', // Gemini uses 'user' for system-like prompts
+                  parts: [{ text: msg.content }]
+                });
+                hasSystemMessage = true;
               }
-              if (!requestUrl.includes('/models/')) {
-                  requestUrl += 'v1beta/models/gemini-pro:generateContent'; 
-                  console.warn("Gemini model not found in URL, assuming 'gemini-pro'");
-              } else if (!requestUrl.includes(':generateContent')) {
-                  requestUrl += ':generateContent';
-              }
+              // Skip additional system messages
+            } else {
+              formattedContents.push({
+                role: msg.role === 'assistant' ? 'model' : 'user',
+                parts: [{ text: msg.content }]
+              });
+            }
+          });
+          
+          // Add current prompt if needed
+          if (formattedContents.length === 0 || 
+              formattedContents[formattedContents.length - 1].role !== 'user') {
+            formattedContents.push({
+              role: 'user',
+              parts: [{ text: prompt }]
+            });
           }
+        } else {
+          // No history, just the current prompt
+          formattedContents = [{ 
+            role: 'user', 
+            parts: [{ text: prompt }] 
+          }];
+        }
 
         requestBody = JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: formattedContents,
           generationConfig: {
             temperature: config.temperature ?? 0.7,
-            maxOutputTokens: 4000 // Increased for longer responses
-          }
+            maxOutputTokens: 4000,
+            topP: 1,
+            topK: 1
+          },
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HARASSMENT",
+              threshold: "BLOCK_NONE"
+            },
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_NONE"
+            },
+            {
+              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+              threshold: "BLOCK_NONE"
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_NONE"
+            }
+          ]
         });
-
       } else {
         return `Error: Unsupported provider "${config.provider}" selected.`;
       }
 
       console.log(`Making request to: ${requestUrl}`);
+      console.log('Request body:', requestBody);
 
       const response = await fetch(requestUrl, {
         method: 'POST',
@@ -182,27 +332,26 @@ IMPORTANT: Ensure your response starts with ##PLAN##`;
       if (!response.ok) {
         const errorBody = await response.text();
         console.error('API Error Response:', errorBody);
-        throw new Error(`API request failed with status ${response.status}: ${response.statusText}`);
+        throw new Error(`API request failed with status ${response.status}: ${response.statusText}. Body: ${errorBody}`);
       }
 
       const data = await response.json();
-      console.log('API Success Response received');
+      console.log('API Success Response:', data);
 
       // Extract content based on provider
       if (config.provider === 'azure-openai' || config.provider === 'openai') {
         return data.choices?.[0]?.message?.content?.trim() ?? "No content found in response.";
       } else if (config.provider === 'gemini') {
         if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-             return data.candidates[0].content.parts[0].text.trim();
-         } else if (data.promptFeedback?.blockReason) {
-             return `Error: Prompt blocked due to ${data.promptFeedback.blockReason}`;
-         } else {
-              return "No content found in Gemini response.";
-          }
+          return data.candidates[0].content.parts[0].text.trim();
+        } else if (data.promptFeedback?.blockReason) {
+          return `Error: Prompt blocked due to ${data.promptFeedback.blockReason}`;
+        } else {
+          return "No content found in Gemini response.";
+        }
       } else {
-          return "Error: Provider response parsing not implemented.";
+        return "Error: Provider response parsing not implemented.";
       }
-
     } catch (error: any) {
       console.error("Failed to send prompt to LLM:", error);
       return `Error: ${error.message || 'An unexpected error occurred during the API call.'}`;
@@ -218,7 +367,8 @@ IMPORTANT: Ensure your response starts with ##PLAN##`;
     onChunk: StreamChunkCallback,
     onComplete: StreamCompleteCallback,
     onError: StreamErrorCallback,
-    abortController?: AbortController
+    abortController?: AbortController,
+    messageHistory: ChatMessage[] = []
   ): void {
     console.log('Streaming prompt to LLM:', { provider: config.provider });
 
@@ -238,12 +388,23 @@ IMPORTANT: Ensure your response starts with ##PLAN##`;
 
     try {
       if (config.provider === 'azure-openai' || config.provider === 'openai') {
-        // Add stream: true to request body for streaming
+        // Split the prompt to separate system instructions from user request
+        const promptParts = prompt.split('User request:');
+        const systemInstructions = promptParts[0].trim();
+        const userRequest = promptParts[1]?.trim() || prompt.trim();
+
+        // Include message history and new messages in the request
+        const messages = [
+          { role: 'system', content: systemInstructions },
+          ...messageHistory,
+          { role: 'user', content: userRequest }
+        ];
+
         requestBody = JSON.stringify({
-          messages: [{ role: 'user', content: prompt }],
+          messages: messages,
           temperature: config.temperature ?? 0.7,
           max_tokens: 4000,
-          stream: true // Enable streaming for OpenAI models
+          stream: true
         });
         
         if (config.provider === 'azure-openai') {
@@ -335,27 +496,69 @@ IMPORTANT: Ensure your response starts with ##PLAN##`;
           });
 
       } else if (config.provider === 'gemini') {
-        // For Gemini, we'll use the abort signal for the main request
-        headers['x-goog-api-key'] = config.apiToken;
+        // For Gemini, we need to format the history differently
+        // and ensure there's only ONE system message
+        let formattedHistory: any[] = [];
+        let hasSystemMessage = false;
         
-        if (!requestUrl.includes(':generateContent')) {
-            if (!requestUrl.endsWith('/')) {
-                requestUrl += '/';
+        // Process message history to ensure only one system message
+        messageHistory.forEach(msg => {
+          if (msg.role === 'system') {
+            if (!hasSystemMessage) {
+              formattedHistory.push({
+                role: 'user', // Gemini doesn't have 'system' role, so we use 'user'
+                parts: [{ text: msg.content }]
+              });
+              hasSystemMessage = true;
             }
-            if (!requestUrl.includes('/models/')) {
-                requestUrl += 'v1beta/models/gemini-pro:generateContent'; 
-                console.warn("Gemini model not found in URL, assuming 'gemini-pro'");
-            } else if (!requestUrl.includes(':generateContent')) {
-                requestUrl += ':generateContent';
-            }
+            // Skip additional system messages
+          } else {
+            formattedHistory.push({
+              role: msg.role === 'assistant' ? 'model' : 'user',
+              parts: [{ text: msg.content }]
+            });
+          }
+        });
+        
+        // Add the current prompt as the latest user message if no history
+        // or if the last message wasn't from the user
+        if (formattedHistory.length === 0 || 
+            (formattedHistory.length > 0 && formattedHistory[formattedHistory.length - 1].role !== 'user')) {
+          formattedHistory.push({
+            role: 'user',
+            parts: [{ text: prompt }]
+          });
         }
 
+        // Use the API key directly for Gemini
+        headers['x-goog-api-key'] = config.apiToken;
+
         requestBody = JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          contents: formattedHistory,
           generationConfig: {
             temperature: config.temperature ?? 0.7,
-            maxOutputTokens: 4000
-          }
+            maxOutputTokens: 4000,
+            topP: 1,
+            topK: 1
+          },
+          safetySettings: [
+            {
+              category: "HARM_CATEGORY_HARASSMENT",
+              threshold: "BLOCK_NONE"
+            },
+            {
+              category: "HARM_CATEGORY_HATE_SPEECH",
+              threshold: "BLOCK_NONE"
+            },
+            {
+              category: "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+              threshold: "BLOCK_NONE"
+            },
+            {
+              category: "HARM_CATEGORY_DANGEROUS_CONTENT",
+              threshold: "BLOCK_NONE"
+            }
+          ]
         });
 
         fetch(requestUrl, {

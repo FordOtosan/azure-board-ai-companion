@@ -9,10 +9,13 @@ import { ChatMessages } from '../features/chat/components/ChatMessages';
 import { TeamSelector } from '../features/chat/components/TeamSelector'; // Restore TeamSelector import
 import '../features/chat/styles/chat.css';
 import { LlmConfig, LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
-import { LlmApiService } from '../services/api/LlmApiService'; // Import the new LLM API Service
+import { TeamWorkItemConfig, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
+import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
+import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
 import { getOrganizationAndProject } from '../services/sdk/AzureDevOpsInfoService';
 import { AzureDevOpsSdkService } from '../services/sdk/AzureDevOpsSdkService';
+import { createSummaryPrompt } from '../services/utils/SummaryUtils';
 import { Language, translations } from '../translations'; // Import translations and language type
 
 // Define message type for chat state
@@ -65,6 +68,12 @@ const ChatPage: React.FC = () => {
   // Add AbortController ref
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
+  // Add new state for team mapping
+  const [teamMapping, setTeamMapping] = React.useState<TeamWorkItemConfig | null>(null);
+
+  // Add new state for LLM conversation history
+  const [llmHistory, setLlmHistory] = React.useState<ChatMessage[]>([]);
+  
   const T = translations[currentLanguage]; // Get current language translations
 
   React.useEffect(() => {
@@ -162,11 +171,74 @@ const ChatPage: React.FC = () => {
        }
   }, [initialized, isLoadingTeams, teamsLoaded, teamError, selectedTeam, teams, messages.length]); // Removed T and currentLanguage, added messages.length
 
+  // Add new effect to load team mapping when team is selected
+  React.useEffect(() => {
+    const loadTeamMapping = async () => {
+      if (selectedTeam) {
+        try {
+          const settings = await WorkItemSettingsService.getSettings();
+          const mapping = settings.teamConfigs.find(config => config.teamId === selectedTeam.id);
+          setTeamMapping(mapping || null);
+        } catch (error) {
+          console.error('Error loading team mapping:', error);
+          setTeamMapping(null);
+        }
+      } else {
+        setTeamMapping(null);
+      }
+    };
+
+    loadTeamMapping();
+  }, [selectedTeam]);
+
+  // Add effect to clear conversation history when team or action changes
+  React.useEffect(() => {
+    // Only clear history when team changes, not when action changes
+    // This allows the LLM to remember previous conversations within the same team context
+    if (selectedTeam) {
+      // Don't clear history completely, just add a context separator if needed
+      const lastMessage = llmHistory[llmHistory.length - 1];
+      if (llmHistory.length > 0 && 
+          (!lastMessage || lastMessage.role !== 'system' || !lastMessage.content.includes('Context Switch'))) {
+        // Add a system message indicating context switch but preserve history
+        setLlmHistory(prev => [...prev, { 
+          role: 'system', 
+          content: `Context Switch: ${selectedAction === 'create_wi' ? 'Work Item Creation' : 'General Chat'}`
+        }]);
+      }
+    } else {
+      // Only clear history when team changes, not just action
+      setLlmHistory([]);
+    }
+  }, [selectedTeam]);
+
   // --- Handlers ---
   const handleTeamSelect = (team: WebApiTeam) => {
     setSelectedTeam(team);
     setSelectedAction(null); // Reset action when a new team is selected
     setTeamError(null); 
+    
+    // Add context system message to LLM history
+    setLlmHistory(prev => {
+      // If we have previous history, add a clear context switch message
+      if (prev.length > 0) {
+        return [
+          ...prev, 
+          { 
+            role: 'system', 
+            content: `NEW TEAM CONTEXT: User has switched to team "${team.name}". Previous conversation may be in a different context.`
+          }
+        ];
+      }
+      // If this is the first team selection, just add an initial context
+      return [
+        { 
+          role: 'system', 
+          content: `TEAM CONTEXT: User is working with team "${team.name}".`
+        }
+      ];
+    });
+    
     const systemMessage: Message = {
         id: `team-select-${team.id}`,
         role: 'system',
@@ -409,22 +481,28 @@ const ChatPage: React.FC = () => {
     // Set both the state and the ref to ensure we have the ID available in both places
     console.log("Setting streamingMessageId state and ref to:", assistantMsgId);
     setStreamingMessageId(assistantMsgId);
-    streamingMessageIdRef.current = assistantMsgId; // Set the ref value directly
+    streamingMessageIdRef.current = assistantMsgId;
     
     setIsLoadingResponse(true);
-    setCanStopGeneration(true); // Enable stop generation
+    setCanStopGeneration(true);
 
     const context = selectedTeam ? `Team: ${selectedTeam.name}` : "General";
     console.log(`Streaming from LLM (Lang: ${currentLanguage}, Context: ${context}):`, prompt.substring(0, 30) + "...");
     
     if (selectedAction === 'create_wi') {
-      // Check if we have a selected LLM
       if (!currentLlm) {
         handleStreamError(new Error('No LLM configuration selected'));
         return;
       }
 
-      // Stream work item plan creation
+      // Add user message to LLM history
+      const newUserMessage: ChatMessage = { role: 'user', content: prompt };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
+
+      // Stream work item plan creation with history
       LlmApiService.createWorkItemPlanStream(
         llmSettings,
         prompt,
@@ -432,24 +510,33 @@ const ChatPage: React.FC = () => {
         updateStreamingMessage,
         (fullResponse) => {
           handleStreamComplete(fullResponse);
-          setCanStopGeneration(false); // Disable stop generation when complete
+          setCanStopGeneration(false);
+          // Add assistant response to history
+          setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
         },
         (error) => {
           handleStreamError(error);
-          setCanStopGeneration(false); // Disable stop generation on error
+          setCanStopGeneration(false);
         },
-        currentLlm, // Pass the currently selected LLM configuration
-        abortControllerRef.current // Pass the abort controller
+        currentLlm,
+        abortControllerRef.current,
+        teamMapping,
+        updatedHistory
       );
     } else {
-      // Stream general queries
-      const generalPrompt = `Please respond in ${currentLanguage === 'en' ? 'English' : 'Turkish'}. User request: ${prompt}`;
-      
-      // Use the currently selected LLM instead of default
       if (!currentLlm) {
         handleStreamError(new Error('No LLM configuration selected'));
         return;
       }
+
+      const generalPrompt = `Please respond in ${currentLanguage === 'en' ? 'English' : 'Turkish'}. User request: ${prompt}`;
+      
+      // Add user message to LLM history
+      const newUserMessage: ChatMessage = { role: 'user', content: generalPrompt };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
 
       LlmApiService.streamPromptToLlm(
         currentLlm,
@@ -457,15 +544,225 @@ const ChatPage: React.FC = () => {
         updateStreamingMessage,
         (fullResponse) => {
           handleStreamComplete(fullResponse);
-          setCanStopGeneration(false); // Disable stop generation when complete
+          setCanStopGeneration(false);
+          // Add assistant response to history
+          setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
         },
         (error) => {
           handleStreamError(error);
-          setCanStopGeneration(false); // Disable stop generation on error
+          setCanStopGeneration(false);
         },
-        abortControllerRef.current // Pass the abort controller
+        abortControllerRef.current,
+        updatedHistory
       );
     }
+  };
+
+  // Handler for high-level plan generation
+  const handleSendHighLevelPlan = async (prompt: string) => {
+    if (!prompt.trim() || !llmSettings || isLoadingResponse || !currentLlm) return;
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+
+    // Check if this is document content
+    const isDocumentContent = prompt.length > 1000 && prompt.split('\n').length > 5;
+    
+    // For document content, we don't show the content in chat
+    const displayContent = isDocumentContent 
+      ? `Generate a hierarchical work plan based on the uploaded document.` 
+      : prompt;
+
+    // Add the user message first
+    const userMessageId = Date.now();
+    const userMessage: Message = {
+      id: userMessageId,
+      role: 'user',
+      content: isDocumentContent ? displayContent : prompt
+    };
+
+    // Create new message for high-level plan
+    const planMessageId = Date.now() + 1;
+    const planMessage: Message = {
+      id: planMessageId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true
+    };
+
+    // Add both messages to the chat
+    setMessages(prev => [...prev, userMessage, planMessage]);
+
+    // Set streaming state for the plan
+    setStreamingMessageId(planMessageId);
+    streamingMessageIdRef.current = planMessageId;
+    setIsLoadingResponse(true);
+    setCanStopGeneration(true);
+
+    try {
+      // Add user message to LLM history
+      const newUserMessage: ChatMessage = { 
+        role: 'user', 
+        content: isDocumentContent 
+          ? "Create a hierarchical work plan based on this document content." 
+          : prompt 
+      };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
+      
+      // Pass message history to maintain context
+      const response = await HighLevelPlanService.generateHighLevelPlan(currentLlm, prompt, undefined, updatedHistory);
+      handleStreamComplete(response);
+      setCanStopGeneration(false);
+      
+      // Add assistant response to history
+      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (error) {
+      handleStreamError(error as Error);
+      setCanStopGeneration(false);
+    }
+  };
+
+  // Handler for document plan streaming
+  const handleStreamDocumentPlan = (fileName: string, content: string, callbacks: {
+    onChunk: StreamChunkCallback;
+    onComplete: StreamCompleteCallback;
+    onError: StreamErrorCallback;
+  }) => {
+    if (!currentLlm) {
+      callbacks.onError(new Error("Please select an LLM provider first"));
+      return;
+    }
+
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+
+    (async () => {
+      try {
+        // Set loading state - this will disable UI interaction
+        setIsLoadingResponse(true);
+        
+        // First, generate a summary silently (don't show document content to user)
+        const summarizePrompt = createSummaryPrompt(content, currentLanguage, true, fileName);
+        const summary = await LlmApiService.sendPromptToLlm(currentLlm, summarizePrompt, []);
+        
+        // Add a system message with the document analysis
+        const summaryMessageId = Date.now() + 1;
+        const summaryMessage: Message = {
+          id: summaryMessageId,
+          role: 'assistant',
+          content: `**Document Analysis:**\n\n${summary}`
+        };
+        
+        // Add summary message to the chat
+        setMessages(prev => [...prev, summaryMessage]);
+        
+        // Update conversation history
+        const systemDocumentContext: ChatMessage = { 
+          role: 'system', 
+          content: `Document Context: The user has uploaded a file "${fileName}" with summary: ${summary}`
+        };
+        
+        // Add to history
+        const updatedHistory = [...llmHistory, systemDocumentContext];
+        setLlmHistory(updatedHistory);
+        
+        // Create a plan based on the summary
+        const planPrompt = `Create a detailed work breakdown plan based on this summary of "${fileName}":\n\n${summary}`;
+        
+        // Call the high-level plan function, but create a new message instead of updating
+        // We don't want to show a loading message, just set the loading state
+        await sendHighLevelPlanAsNewMessage(planPrompt);
+        
+        // Callback to complete the flow
+        callbacks.onComplete("");
+        
+        // Reset loading state
+        setIsLoadingResponse(false);
+      } catch (error) {
+        console.error('Error generating document summary:', error);
+        callbacks.onError(error as Error);
+        setIsLoadingResponse(false);
+      }
+    })();
+  };
+  
+  // Helper function to send high-level plan as a new message instead of updating an existing one
+  const sendHighLevelPlanAsNewMessage = async (prompt: string) => {
+    if (!prompt.trim() || !llmSettings || !currentLlm) return;
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+
+    try {
+      // Add user message to LLM history but don't show it in the UI
+      const newUserMessage: ChatMessage = { 
+        role: 'user', 
+        content: prompt
+      };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
+      
+      // Generate the plan
+      const response = await HighLevelPlanService.generateHighLevelPlan(currentLlm, prompt, undefined, updatedHistory);
+      
+      // Create a new message for the plan
+      const planMessage: Message = {
+        id: Date.now(),
+        role: 'assistant',
+        content: response
+      };
+      
+      // Add the plan message to the chat
+      setMessages(prev => [...prev, planMessage]);
+      
+      // Add assistant response to history
+      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now(),
+        role: 'system',
+        content: `Error: ${(error as Error).message || 'An error occurred while generating the plan.'}`
+      };
+      
+      setMessages(prev => [...prev, errorMessage]);
+    }
+  };
+
+  // Function to handle starting a new conversation
+  const handleNewConversation = () => {
+    // Clear all messages except system/team context messages
+    const systemMessages = messages.filter(m => 
+      m.role === 'system' && (
+        String(m.id).startsWith('team-select-') || 
+        String(m.id).startsWith('action-')
+      )
+    );
+    
+    setMessages(systemMessages);
+    
+    // Keep only the system context message for the current team and action
+    const systemContextMessages = llmHistory.filter(m => 
+      m.role === 'system' && (
+        m.content.includes('TEAM CONTEXT') || 
+        m.content.includes('Context Switch')
+      )
+    );
+    
+    setLlmHistory(systemContextMessages);
+    
+    // Clear any streaming state
+    if (streamingMessageIdRef.current) {
+      streamingMessageIdRef.current = null;
+      setStreamingMessageId(null);
+    }
+    
+    setIsLoadingResponse(false);
+    setCanStopGeneration(false);
   };
 
   // --- Render Logic --- 
@@ -480,7 +777,12 @@ const ChatPage: React.FC = () => {
   }
 
   return (
-    <Box className="chat-container" sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+    <Box className="chat-container" sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: '100vh',
+      overflow: 'hidden' // Prevent outer container from scrolling
+    }}>
       <ChatHeader 
          organizationName={orgProjectInfo.organizationName}
          projectName={orgProjectInfo.projectName}
@@ -498,10 +800,57 @@ const ChatPage: React.FC = () => {
               py: 0, 
               px: 0, 
               display: 'flex',
-              flexDirection: 'column', 
-              overflow: 'hidden' 
+              flexDirection: 'column',
+              height: 'calc(100vh - 64px)', // Subtract header height
+              overflow: 'hidden', // Hide container overflow
+              maxWidth: '100%' // Ensure container takes full width
           }}
       >
+          {/* Global loading overlay for JSON plan generation */}
+          {isLoadingResponse && !streamingMessageId && (
+            <Box
+              sx={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1300,
+              }}
+            >
+              <Box
+                sx={{
+                  backgroundColor: 'background.paper',
+                  borderRadius: 2,
+                  p: 4,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  boxShadow: 24,
+                  maxWidth: '80%',
+                  textAlign: 'center',
+                }}
+              >
+                <CircularProgress size={60} thickness={4} />
+                <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
+                  {currentLanguage === 'en' 
+                    ? 'Creating detailed work item plan...'
+                    : 'Detaylı iş öğesi planı oluşturuluyor...'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {currentLanguage === 'en'
+                    ? 'Generating JSON structure based on the high-level plan'
+                    : 'Üst düzey plana dayalı JSON yapısı oluşturuluyor'}
+                </Typography>
+              </Box>
+            </Box>
+          )}
+
           {/* General Error Display */}
           {error && (
              <Typography color="error" sx={{ p: 2, textAlign: 'center', flexShrink: 0 }}>
@@ -515,10 +864,124 @@ const ChatPage: React.FC = () => {
                 currentLanguage={currentLanguage}
                 translations={translations}
                 workItemSysPrompt={workItemSysPrompt}
+                onUsePlan={(msg) => {
+                  // Set loading state globally (same as document upload)
+                  setIsLoadingResponse(true);
+                  setCanStopGeneration(true);
+                  
+                  // Get the plan content
+                  const planContent = msg.content || '';
+                  
+                  // Create the prompt for detailed JSON plan
+                  const jsonPrompt = `Based on the following high-level plan:
+                  
+${planContent}
+
+Create a detailed JSON structure for work items that follows the Azure DevOps work item structure. 
+
+Important details:
+1. Use the language: ${currentLanguage}
+2. Available work item types: ${teamMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ') || 'No types defined'}
+3. For each work item type, use these fields:
+${teamMapping?.workItemTypes.filter(t => t.enabled).map(t => 
+  `   - ${t.name}: ${t.fields.filter(f => f.enabled).map(f => f.displayName || f.name).join(', ')}`
+).join('\n') || 'No fields defined'}
+4. Create a hierarchical structure that matches the plan (epics contain features, features contain user stories, user stories contain tasks, etc.)
+5. Don't duplicate work items that might already exist
+6. Ensure all JSON is valid and properly formatted
+7. Include all relevant details from the plan in the JSON structure
+
+Response format:
+{
+  "workItems": [
+    {
+      "type": "User Story",
+      "title": "...",
+      "description": "...",
+      "additionalFields": {
+        "fieldName": "value"
+      },
+      "children": [
+        {
+          "type": "Task",
+          "title": "...",
+          "description": "...",
+          "additionalFields": {}
+        }
+      ]
+    }
+  ]
+}`;
+
+                  // Create new AbortController for this request
+                  abortControllerRef.current = new AbortController();
+                  
+                  // Call LLM service
+                  (async () => {
+                    try {
+                      // Add the prompt to history
+                      const newUserMessage: ChatMessage = { 
+                        role: 'user', 
+                        content: jsonPrompt
+                      };
+                      const updatedHistory = [...llmHistory, newUserMessage];
+                      setLlmHistory(updatedHistory);
+                      
+                      // Get response from LLM
+                      const response = await LlmApiService.sendPromptToLlm(
+                        currentLlm!, 
+                        jsonPrompt,
+                        updatedHistory
+                      );
+                      
+                      // Create a new message for the JSON response instead of updating loading message
+                      const jsonResponseMessage: Message = {
+                        id: Date.now(),
+                        role: 'assistant',
+                        content: response
+                      };
+                      
+                      // Add the response message to the chat
+                      setMessages(prev => [...prev, jsonResponseMessage]);
+                      
+                      // Update history
+                      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
+                      
+                      // Reset loading state
+                      setIsLoadingResponse(false);
+                      setCanStopGeneration(false);
+                      
+                    } catch (error) {
+                      console.error('Error generating detailed JSON:', error);
+                      
+                      // Create an error message
+                      const errorMessage: Message = {
+                        id: Date.now(),
+                        role: 'system',
+                        content: `Error creating detailed JSON plan: ${(error as Error).message || 'Unknown error'}`
+                      };
+                      
+                      // Add the error message to chat
+                      setMessages(prev => [...prev, errorMessage]);
+                      
+                      // Reset loading state
+                      setIsLoadingResponse(false);
+                      setCanStopGeneration(false);
+                    }
+                  })();
+                }}
            />
 
           {/* Conditional Bottom Area: Load Buttons / Loader / Team Selector / Chat Input */} 
-           <Box sx={{ mt: 'auto', flexShrink: 0, borderTop: 1, borderColor: 'divider' }}> 
+           <Box sx={{ 
+             mt: 'auto', 
+             flexShrink: 0, 
+             borderTop: 1, 
+             borderColor: 'divider',
+             bgcolor: 'background.paper', // Ensure bottom area has solid background
+             position: 'relative', // For proper stacking
+             zIndex: 1 // Ensure it stays above content
+           }}> 
               {/* Show loading indicator for teams */} 
               {isLoadingTeams && (
                  <Box sx={{ p: 2, textAlign: 'center' }}><CircularProgress size={24} /></Box> 
@@ -554,11 +1017,15 @@ const ChatPage: React.FC = () => {
                  <ChatInput 
                       selectedTeam={selectedTeam} 
                       onSendMessage={handleSendMessage}
+                      onSendHighLevelPlan={handleSendHighLevelPlan}
+                      onStreamDocumentPlan={handleStreamDocumentPlan}
                       isLoading={isLoadingResponse}
                       currentLanguage={currentLanguage}
                       onChangeTeamRequest={handleChangeTeamRequest}
                       onStopGeneration={canStopGeneration ? handleStopGeneration : undefined}
                       selectedLlm={currentLlm}
+                      teamMapping={teamMapping}
+                      onNewConversation={handleNewConversation}
                  />
               )}
            </Box>
