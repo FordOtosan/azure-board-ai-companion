@@ -1,7 +1,8 @@
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import Description from '@mui/icons-material/Description'; // Add icon for JSON Plan
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'; // Import icon
 import ReplayIcon from '@mui/icons-material/Replay';
-import { Box, IconButton, Tooltip } from '@mui/material';
+import { Box, Button, IconButton, Tooltip } from '@mui/material'; // Add Button component
 import * as React from 'react';
 
 // Import the shared Language type and translations structure
@@ -29,52 +30,60 @@ interface ChatMessagesProps {
   onUsePlan?: (message: Message) => void;
 }
 
-// Define translations for this component
+// Add translations for JSON plan
 const componentTranslations = {
   en: {
-    copy: "Copy message",
-    copied: "Copied!",
-    retry: "Retry this message",
-    createWorkItems: "Create Work Items",
+    copy: 'Copy message',
+    copied: 'Copied!',
+    retry: 'Retry this message',
+    viewJsonPlan: 'View Work Item Plan',
+    createWorkItems: 'Create Work Items'
   },
   tr: {
-    copy: "Mesajı kopyala",
-    copied: "Kopyalandı!",
-    retry: "Bu mesajı tekrar dene",
-    createWorkItems: "İş Öğeleri Oluştur",
+    copy: 'Mesajı kopyala',
+    copied: 'Kopyalandı!',
+    retry: 'Bu mesajı yeniden dene',
+    viewJsonPlan: 'İş Öğesi Planını Görüntüle',
+    createWorkItems: 'İş Öğeleri Oluştur'
   }
 } as const;
 
 export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLanguage, translations, workItemSysPrompt, onRetry, onCreateWorkItems, onUsePlan }) => {
-  const messagesEndRef = React.useRef<null | HTMLDivElement>(null);
-  // Blinking cursor state for streaming effect
-  const [showCursor, setShowCursor] = React.useState(true);
+  // Scroll to bottom ref
+  const messagesEndRef = React.useRef<HTMLDivElement>(null);
+  // State for copied message
   const [copiedId, setCopiedId] = React.useState<string | number | null>(null);
+  // State for showing cursor
+  const [showCursor, setShowCursor] = React.useState(true);
 
+  // Translation shorthand
   const T = componentTranslations[currentLanguage];
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  React.useEffect(scrollToBottom, [messages]);
-
-  // Blinking cursor effect for streaming messages
+  // Scroll to bottom when messages change
   React.useEffect(() => {
-    const cursorInterval = setInterval(() => {
-      setShowCursor(prev => !prev);
-    }, 600); // Toggle every 600ms
+    scrollToBottom();
+  }, [messages]);
 
-    return () => clearInterval(cursorInterval);
+  // Blink cursor (show/hide every 500ms)
+  React.useEffect(() => {
+    const interval = setInterval(() => {
+      setShowCursor(prev => !prev);
+    }, 500);
+
+    return () => clearInterval(interval);
   }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   const handleCopy = async (content: string, messageId: string | number) => {
     try {
       await navigator.clipboard.writeText(content);
       setCopiedId(messageId);
       setTimeout(() => setCopiedId(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
+    } catch (error) {
+      console.error('Failed to copy:', error);
     }
   };
 
@@ -104,6 +113,27 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
 
   const isDocumentPlan = (content: string): boolean => {
     return content.startsWith('##DOCUMENTPLAN##');
+  };
+
+  // New function to detect if content is a JSON plan
+  const isJsonPlan = (content: string): boolean => {
+    // Check if content contains a workItems array as part of JSON structure
+    try {
+      // Check if it has a code block with JSON
+      if (content.includes('```json') || content.includes('```')) {
+        return true;
+      }
+      
+      // Try to see if the entire content is JSON
+      if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
+        const parsed = JSON.parse(content);
+        return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+      }
+      
+      return false;
+    } catch (e) {
+      return false;
+    }
   };
 
   return (
@@ -138,6 +168,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
            const isStreaming = msg.isStreaming === true;
            const hasHighLevelPlan = isHighLevelPlan(messageContent);
            const hasDocumentPlan = isDocumentPlan(messageContent);
+           const hasJsonPlan = isJsonPlan(messageContent);
            
            return (
              <Box 
@@ -161,6 +192,30 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                      currentLanguage={currentLanguage}
                      onUsePlan={() => onUsePlan?.(msg)}
                    />
+                 ) : hasJsonPlan ? (
+                   // Display a button instead of the JSON content
+                   <Box sx={{ 
+                     p: 2, 
+                     backgroundColor: 'background.paper', 
+                     borderRadius: 2,
+                     border: '1px solid',
+                     borderColor: 'divider',
+                     display: 'flex',
+                     flexDirection: 'column',
+                     alignItems: 'center',
+                     gap: 2
+                   }}>
+                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                       <Description color="primary" />
+                       <Button
+                         variant="contained"
+                         color="primary"
+                         onClick={() => onUsePlan?.(msg)}
+                       >
+                         {T.createWorkItems}
+                       </Button>
+                     </Box>
+                   </Box>
                  ) : (
                    <Box sx={{ position: 'relative', width: '100%' }}>
                      <MarkdownMessage

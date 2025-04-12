@@ -1,4 +1,4 @@
-import { Box, CircularProgress, Container, Typography } from '@mui/material';
+import { Box, Button, CircularProgress, Container, Dialog, DialogActions, DialogContent, DialogTitle, Typography } from '@mui/material';
 import { WebApiTeam } from 'azure-devops-extension-api/Core'; // Restore team type import
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
@@ -7,12 +7,14 @@ import { ChatHeader } from '../features/chat/components/ChatHeader';
 import { ChatInput } from '../features/chat/components/ChatInput';
 import { ChatMessages } from '../features/chat/components/ChatMessages';
 import { TeamSelector } from '../features/chat/components/TeamSelector'; // Restore TeamSelector import
+import { WorkItemForm } from '../features/chat/components/WorkItemForm';
 import '../features/chat/styles/chat.css';
 import { LlmConfig, LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
 import { TeamWorkItemConfig, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
 import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
 import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
+import { WorkItemCreationResult, WorkItemService } from '../services/api/WorkItemService';
 import { getOrganizationAndProject } from '../services/sdk/AzureDevOpsInfoService';
 import { AzureDevOpsSdkService } from '../services/sdk/AzureDevOpsSdkService';
 import { createSummaryPrompt } from '../services/utils/SummaryUtils';
@@ -75,6 +77,13 @@ const ChatPage: React.FC = () => {
   const [llmHistory, setLlmHistory] = React.useState<ChatMessage[]>([]);
   
   const T = translations[currentLanguage]; // Get current language translations
+
+  const [jsonPlan, setJsonPlan] = React.useState<string | null>(null);
+  const [isWorkItemFormOpen, setIsWorkItemFormOpen] = React.useState(false);
+  const [creationResults, setCreationResults] = React.useState<WorkItemCreationResult[] | null>(null);
+  const [isCreatingWorkItems, setIsCreatingWorkItems] = React.useState(false);
+  
+  const [isWorkItemResultsOpen, setIsWorkItemResultsOpen] = React.useState(false);
 
   React.useEffect(() => {
     // Initialize SDK, get Org/Project info, fetch Teams, and LLM Settings
@@ -765,6 +774,48 @@ const ChatPage: React.FC = () => {
     setCanStopGeneration(false);
   };
 
+  // Count total work items in results (including children)
+  const countWorkItems = (results: WorkItemCreationResult[]): number => {
+    let count = results.length;
+    
+    for (const result of results) {
+      if (result.children && result.children.length > 0) {
+        count += countWorkItems(result.children);
+      }
+    }
+    
+    return count;
+  };
+
+  // Render work item creation results recursively
+  const renderWorkItemResults = (results: WorkItemCreationResult[], depth = 0): React.ReactNode => {
+    return (
+      <Box sx={{ ml: depth * 2 }}>
+        {results.map((result) => (
+          <Box key={result.id} sx={{ mb: 1 }}>
+            <Typography sx={{ fontWeight: 'bold', display: 'flex', alignItems: 'center' }}>
+              {result.type}: {result.title}
+              <Button 
+                size="small" 
+                href={result.url} 
+                target="_blank" 
+                sx={{ ml: 1 }}
+              >
+                #{result.id}
+              </Button>
+            </Typography>
+            
+            {result.children && result.children.length > 0 && (
+              <Box sx={{ ml: 2, mt: 1 }}>
+                {renderWorkItemResults(result.children, depth + 1)}
+              </Box>
+            )}
+          </Box>
+        ))}
+      </Box>
+    );
+  };
+
   // --- Render Logic --- 
 
   if (!initialized) { // Simplified initial loading check
@@ -850,6 +901,51 @@ const ChatPage: React.FC = () => {
               </Box>
             </Box>
           )}
+          
+          {/* Global loading overlay for work item creation */}
+          {isCreatingWorkItems && (
+            <Box
+              sx={{
+                position: 'fixed',
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                zIndex: 1400,
+              }}
+            >
+              <Box
+                sx={{
+                  backgroundColor: 'background.paper',
+                  borderRadius: 2,
+                  p: 4,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  boxShadow: 24,
+                  maxWidth: '80%',
+                  textAlign: 'center',
+                }}
+              >
+                <CircularProgress size={60} thickness={4} />
+                <Typography variant="h6" sx={{ mt: 3, mb: 1 }}>
+                  {currentLanguage === 'en' 
+                    ? 'Creating work items...'
+                    : 'İş öğeleri oluşturuluyor...'}
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {currentLanguage === 'en'
+                    ? 'Creating work items in Azure DevOps'
+                    : 'Azure DevOps\'da iş öğeleri oluşturuluyor'}
+                </Typography>
+              </Box>
+            </Box>
+          )}
 
           {/* General Error Display */}
           {error && (
@@ -865,12 +961,45 @@ const ChatPage: React.FC = () => {
                 translations={translations}
                 workItemSysPrompt={workItemSysPrompt}
                 onUsePlan={(msg) => {
+                  // Get the message content
+                  const messageContent = msg.content || '';
+                  
+                  // Check if this is already a JSON plan
+                  const isJsonPlan = (() => {
+                    try {
+                      // Check if it has a code block with JSON
+                      const codeBlockMatch = messageContent.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+                      if (codeBlockMatch && codeBlockMatch[1]) {
+                        const parsed = JSON.parse(codeBlockMatch[1]);
+                        return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+                      }
+                      
+                      // Try to see if the entire content is JSON
+                      if (messageContent.trim().startsWith('{') && messageContent.trim().endsWith('}')) {
+                        const parsed = JSON.parse(messageContent);
+                        return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+                      }
+                      
+                      return false;
+                    } catch (e) {
+                      return false;
+                    }
+                  })();
+                  
+                  if (isJsonPlan) {
+                    // If it's already a JSON plan, directly open the form with that content
+                    setJsonPlan(messageContent);
+                    setIsWorkItemFormOpen(true);
+                    return;
+                  }
+                  
+                  // Otherwise, it's a high-level plan and we need to create a JSON plan
                   // Set loading state globally (same as document upload)
                   setIsLoadingResponse(true);
                   setCanStopGeneration(true);
                   
                   // Get the plan content
-                  const planContent = msg.content || '';
+                  const planContent = messageContent;
                   
                   // Create the prompt for detailed JSON plan
                   const jsonPrompt = `Based on the following high-level plan:
@@ -944,8 +1073,11 @@ Response format:
                       // Add the response message to the chat
                       setMessages(prev => [...prev, jsonResponseMessage]);
                       
-                      // Update history
-                      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
+                      // Store JSON plan for form
+                      setJsonPlan(response);
+                      
+                      // Open the work item form
+                      setIsWorkItemFormOpen(true);
                       
                       // Reset loading state
                       setIsLoadingResponse(false);
@@ -971,6 +1103,112 @@ Response format:
                   })();
                 }}
            />
+
+          {/* Work Item Form Dialog */}
+          <Dialog
+            open={isWorkItemFormOpen}
+            onClose={() => setIsWorkItemFormOpen(false)}
+            maxWidth="lg"
+            fullWidth
+            PaperProps={{
+              sx: { 
+                maxHeight: '90vh',
+                height: '90vh'
+              }
+            }}
+          >
+            <DialogContent>
+              {jsonPlan && (
+                <WorkItemForm
+                  jsonPlan={jsonPlan}
+                  onClose={() => setIsWorkItemFormOpen(false)}
+                  currentLanguage={currentLanguage}
+                  availableTypes={teamMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name) || []}
+                  teamMapping={teamMapping}
+                  onSubmit={async (workItems) => {
+                    if (!selectedTeam || !orgProjectInfo.projectName) {
+                      return;
+                    }
+                    
+                    // Set creating state
+                    setIsCreatingWorkItems(true);
+                    
+                    try {
+                      // Create work items
+                      const results = await WorkItemService.createWorkItems(
+                        workItems,
+                        orgProjectInfo.projectName,
+                        selectedTeam
+                      );
+                      
+                      // Store results
+                      setCreationResults(results);
+                      
+                      // Create success message
+                      const totalItems = countWorkItems(results);
+                      const successMessage: Message = {
+                        id: Date.now(),
+                        role: 'system',
+                        content: currentLanguage === 'en'
+                          ? `Successfully created ${totalItems} work items.`
+                          : `${totalItems} iş öğesi başarıyla oluşturuldu.`
+                      };
+                      
+                      // Add success message to chat
+                      setMessages(prev => [...prev, successMessage]);
+                      
+                      // Close form
+                      setIsWorkItemFormOpen(false);
+                      
+                      // Show results
+                      setIsWorkItemResultsOpen(true);
+                    } catch (error) {
+                      console.error('Error creating work items:', error);
+                      
+                      // Create error message
+                      const errorMessage: Message = {
+                        id: Date.now(),
+                        role: 'system',
+                        content: currentLanguage === 'en'
+                          ? `Error creating work items: ${(error as Error).message || 'Unknown error'}`
+                          : `İş öğelerini oluştururken hata: ${(error as Error).message || 'Bilinmeyen hata'}`
+                      };
+                      
+                      // Add error message to chat
+                      setMessages(prev => [...prev, errorMessage]);
+                    } finally {
+                      // Reset creating state
+                      setIsCreatingWorkItems(false);
+                    }
+                  }}
+                />
+              )}
+            </DialogContent>
+          </Dialog>
+
+          {/* Work Item Creation Results Dialog */}
+          <Dialog
+            open={isWorkItemResultsOpen}
+            onClose={() => setIsWorkItemResultsOpen(false)}
+            maxWidth="md"
+            fullWidth
+          >
+            <DialogTitle>
+              {currentLanguage === 'en' ? 'Work Items Created' : 'Oluşturulan İş Öğeleri'}
+            </DialogTitle>
+            <DialogContent>
+              {creationResults && (
+                <Box sx={{ mt: 2 }}>
+                  {renderWorkItemResults(creationResults)}
+                </Box>
+              )}
+            </DialogContent>
+            <DialogActions>
+              <Button onClick={() => setIsWorkItemResultsOpen(false)}>
+                {currentLanguage === 'en' ? 'Close' : 'Kapat'}
+              </Button>
+            </DialogActions>
+          </Dialog>
 
           {/* Conditional Bottom Area: Load Buttons / Loader / Team Selector / Chat Input */} 
            <Box sx={{ 
