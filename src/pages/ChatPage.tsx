@@ -32,7 +32,7 @@ import { TeamSelector } from '../features/chat/components/TeamSelector'; // Rest
 import { WorkItemForm } from '../features/chat/components/WorkItemForm';
 import '../features/chat/styles/chat.css';
 import { LlmConfig, LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
-import { TeamWorkItemConfig, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
+import { TeamWorkItemConfig, WorkItemMapping, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
 import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
 import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
@@ -120,6 +120,9 @@ const ChatPage: React.FC = () => {
     message: '',
     severity: 'info'
   });
+
+  // Add new state for team work item mapping
+  const [teamWorkItemMapping, setTeamWorkItemMapping] = React.useState<WorkItemMapping | null>(null);
 
   React.useEffect(() => {
     // Initialize SDK, get Org/Project info, fetch Teams, and LLM Settings
@@ -255,6 +258,27 @@ const ChatPage: React.FC = () => {
       // Only clear history when team changes, not just action
       setLlmHistory([]);
     }
+  }, [selectedTeam]);
+
+  // Add new effect to load team work item mapping when team is selected
+  React.useEffect(() => {
+    const loadTeamMapping = async () => {
+      if (selectedTeam && selectedTeam.id) {
+        try {
+          // Load the settings
+          const settings = await WorkItemSettingsService.getSettings();
+          if (settings && settings.mappings.length > 0) {
+            // Get the mapping for the selected team
+            const mapping = WorkItemSettingsService.getMappingForTeam(settings, selectedTeam.id);
+            setTeamWorkItemMapping(mapping);
+          }
+        } catch (error) {
+          console.error("Error loading team work item mapping:", error);
+        }
+      }
+    };
+    
+    loadTeamMapping();
   }, [selectedTeam]);
 
   // --- Handlers ---
@@ -657,8 +681,14 @@ const ChatPage: React.FC = () => {
       // Update the history state immediately to include this message
       setLlmHistory(updatedHistory);
       
-      // Pass message history to maintain context
-      const response = await HighLevelPlanService.generateHighLevelPlan(currentLlm, prompt, undefined, updatedHistory);
+      // Pass message history to maintain context and include team mapping for work item types
+      const response = await HighLevelPlanService.generateHighLevelPlan(
+        currentLlm, 
+        prompt, 
+        undefined, 
+        updatedHistory,
+        teamWorkItemMapping || teamMapping // Use the mapping with hierarchies if available, fall back to teamMapping
+      );
       handleStreamComplete(response);
       setCanStopGeneration(false);
       
@@ -752,8 +782,14 @@ const ChatPage: React.FC = () => {
       // Update the history state immediately to include this message
       setLlmHistory(updatedHistory);
       
-      // Generate the plan
-      const response = await HighLevelPlanService.generateHighLevelPlan(currentLlm, prompt, undefined, updatedHistory);
+      // Generate the plan with team configuration for work item types
+      const response = await HighLevelPlanService.generateHighLevelPlan(
+        currentLlm, 
+        prompt, 
+        undefined, 
+        updatedHistory,
+        teamWorkItemMapping || teamMapping // Use the mapping with hierarchies if available, fall back to teamMapping
+      );
       
       // Create a new message for the plan
       const planMessage: Message = {
@@ -770,10 +806,9 @@ const ChatPage: React.FC = () => {
     } catch (error) {
       const errorMessage: Message = {
         id: Date.now(),
-        role: 'system',
-        content: `Error: ${(error as Error).message || 'An error occurred while generating the plan.'}`
+        role: 'assistant',
+        content: `⚠️ Error generating plan: ${error instanceof Error ? error.message : 'Unknown error'}`
       };
-      
       setMessages(prev => [...prev, errorMessage]);
     }
   };
@@ -1196,46 +1231,393 @@ const ChatPage: React.FC = () => {
                     // Get the plan content
                     const planContent = messageContent;
                     
+                    // Gather field information for the prompt
+                    const fieldInformation = teamMapping?.workItemTypes
+                      .filter(t => t.enabled)
+                      .map(t => {
+                        const requiredFields = t.fields
+                          .filter(f => f.enabled && f.required)
+                          .map(f => f.displayName || f.name);
+                          
+                        const optionalFields = t.fields
+                          .filter(f => f.enabled && !f.required)
+                          .map(f => f.displayName || f.name);
+                          
+                        return {
+                          type: t.name,
+                          requiredFields,
+                          optionalFields,
+                          allFields: t.fields
+                            .filter(f => f.enabled)
+                            .map(f => ({
+                              name: f.displayName || f.name,
+                              required: !!f.required,
+                              description: f.description || '',
+                              examples: getFieldExamples(f.name, t.name)
+                            }))
+                        };
+                      });
+
+                    // Function to provide reasonable examples for common field types
+                    function getFieldExamples(fieldName: string, workItemType: string): string[] {
+                      const normalizedField = fieldName.toLowerCase().replace(/[\s._-]/g, '');
+                      
+                      // Acceptance Criteria examples
+                      if (normalizedField.includes('acceptancecriteria')) {
+                        return [
+                          "### Acceptance Criteria\n1. User can login with valid credentials\n2. Invalid login attempts are rejected\n3. Password reset functionality works",
+                          "### Acceptance Criteria\n- The page loads within 2 seconds\n- All form validations work as expected\n- Data is saved correctly to the database"
+                        ];
+                      }
+                      
+                      // Story Points / Effort examples
+                      if (normalizedField.includes('storypoints') || normalizedField.includes('effort')) {
+                        return ["1", "2", "3", "5", "8", "13"];
+                      }
+                      
+                      // Priority examples
+                      if (normalizedField.includes('priority')) {
+                        return ["1 - Critical", "2 - High", "3 - Medium", "4 - Low"];
+                      }
+                      
+                      // State examples
+                      if (normalizedField.includes('state')) {
+                        if (workItemType.toLowerCase().includes('story')) {
+                          return ["New", "Active", "Resolved", "Closed"];
+                        } else if (workItemType.toLowerCase().includes('task')) {
+                          return ["To Do", "In Progress", "Done"];
+                        } else {
+                          return ["New", "Active", "Closed"];
+                        }
+                      }
+                      
+                      return ["Sample value for " + fieldName];
+                    }
+
                     // Create the prompt for detailed JSON plan
-                    const jsonPrompt = `Based on the following high-level plan:
-                    
+                    const jsonPrompt = `
+# Convert High-Level Plan to Azure DevOps Work Items
+
+## Input High-Level Plan:
 ${planContent}
 
-Create a detailed JSON structure for work items that follows the Azure DevOps work item structure. 
+## Task:
+Create a detailed JSON structure representing Azure DevOps work items based on the high-level plan above.
 
-Important details:
-1. Use the language: ${currentLanguage}
-2. Available work item types: ${teamMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ') || 'No types defined'}
-3. For each work item type, use these fields:
-${teamMapping?.workItemTypes.filter(t => t.enabled).map(t => 
-  `   - ${t.name}: ${t.fields.filter(f => f.enabled).map(f => f.displayName || f.name).join(', ')}`
-).join('\n') || 'No fields defined'}
-4. Create a hierarchical structure that matches the plan (epics contain features, features contain user stories, user stories contain tasks, etc.)
-5. Don't duplicate work items that might already exist
-6. Ensure all JSON is valid and properly formatted
-7. Include all relevant details from the plan in the JSON structure
+## Work Item Type Information:
+${teamMapping && teamMapping.workItemTypes && teamMapping.workItemTypes.filter(t => t.enabled).length > 0 
+  ? `Available work item types: ${teamMapping.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ')}`
+  : 'Using default work item types: Epic, Feature, User Story, Task'}
 
-Response format:
-{
+## Hierarchy Constraints:
+${(() => {
+  // Safe check for hierarchies in WorkItemMapping vs TeamWorkItemConfig
+  if (teamMapping && 'hierarchies' in teamMapping && 
+      teamMapping.hierarchies && Array.isArray(teamMapping.hierarchies) && 
+      teamMapping.hierarchies.length > 0) {
+    return `The following parent-child relationships must be respected:
+${teamMapping.hierarchies.map((h: {parentType: string, childType: string}) => 
+  `- ${h.parentType} can contain ${h.childType}`).join('\n')}`;
+  }
+  return 'Follow standard hierarchical structure (Epics contain Features, Features contain User Stories/Product Backlog Items, User Stories contain Tasks)';
+})()}
+
+## Field Requirements by Work Item Type:
+${fieldInformation?.map(type => 
+  `### ${type.type}
+  **Required Fields:** ${type.requiredFields.length > 0 ? type.requiredFields.join(', ') : 'Title, Description'}
+  **Optional Fields:** ${type.optionalFields.join(', ')}
+  
+  **Field Details:**
+  ${type.allFields.map(field => 
+    `- **${field.name}${field.required ? ' (Required)' : ''}**: ${field.description || ''}
+    - **Examples:** ${field.examples.join(' | ')}`
+  ).join('\n  ')}`
+).join('\n\n') || `### Default Fields for All Types
+- **Title (Required)**: Short, descriptive title
+- **Description (Required)**: Detailed explanation
+
+### Epic
+- **Priority**: 1 - Critical, 2 - High, 3 - Medium, 4 - Low
+- **Business Value**: 1-10 scale representing value to business
+
+### Feature
+- **Acceptance Criteria**: Clear criteria for what makes this feature complete
+- **Effort**: 1, 2, 3, 5, 8, 13, 21
+- **Priority**: 1 - Critical, 2 - High, 3 - Medium, 4 - Low
+
+### User Story/Product Backlog Item
+- **Acceptance Criteria**: Clear criteria for what makes this story complete
+- **Story Points**: 1, 2, 3, 5, 8, 13
+- **Priority**: 1 - Critical, 2 - High, 3 - Medium, 4 - Low
+
+### Task
+- **Activity**: Development, Testing, Documentation, Design, Analysis
+- **Remaining Work**: Estimated hours remaining (like 1, 2, 4, 8)`}
+
+## Special Instructions:
+1. Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}
+2. Create a hierarchical structure that exactly matches the plan
+3. Ensure all parent-child relationships follow the hierarchy constraints
+4. Include ALL required fields for each work item type
+5. Generate realistic, detailed descriptions for each work item
+6. ${(() => {
+      // Check if acceptance criteria is enabled for any work item types
+      const typesWithAcceptanceCriteria: string[] = [];
+      
+      if (teamMapping && teamMapping.workItemTypes) {
+        teamMapping.workItemTypes.forEach(type => {
+          if (type.enabled && type.fields.some(f => 
+            f.enabled && f.name.toLowerCase().includes('acceptancecriteria'))) {
+            typesWithAcceptanceCriteria.push(type.name);
+          }
+        });
+      }
+      
+      if (typesWithAcceptanceCriteria.length > 0) {
+        return `For ${typesWithAcceptanceCriteria.join(', ')} work items, always include detailed acceptance criteria`;
+      } else {
+        return 'For User Stories/Product Backlog Items, always include detailed acceptance criteria';
+      }
+    })()}
+7. Assign appropriate field values based on the work item context
+8. Ensure each task has appropriate estimate/remaining work values
+9. Ensure JSON format is valid and properly formatted
+
+## JSON Structure Format:
+\`\`\`json
+${(() => {
+  // Generate a dynamic JSON example based on the team's actual configuration
+  const generateExampleJson = () => {
+    // Define interfaces for our objects
+    interface WorkItemField {
+      name: string;
+      displayName?: string;
+      enabled: boolean;
+      required?: boolean;
+      description?: string;
+    }
+
+    interface WorkItemType {
+      name: string;
+      enabled: boolean;
+      fields: WorkItemField[];
+    }
+
+    interface WorkItemExample {
+      type: string;
+      title: string;
+      description: string;
+      acceptanceCriteria?: string;
+      additionalFields: Record<string, string>;
+      children: WorkItemExample[];
+    }
+
+    // Default structure if no team mapping is available
+    if (!teamMapping || !teamMapping.workItemTypes) {
+      return `{
   "workItems": [
     {
-      "type": "User Story",
-      "title": "...",
-      "description": "...",
+      "type": "Epic",
+      "title": "Vehicle Management",
+      "description": "Comprehensive system for managing vehicle data.",
       "additionalFields": {
-        "fieldName": "value"
+        "Priority": "2 - High"
       },
       "children": [
         {
-          "type": "Task",
-          "title": "...",
-          "description": "...",
-          "additionalFields": {}
+          "type": "User Story",
+          "title": "Create Vehicle Record",
+          "description": "Allow users to create new vehicle records.",
+          "acceptanceCriteria": "### Acceptance Criteria\\n1. User can enter all vehicle details\\n2. Data is validated\\n3. Record is saved correctly",
+          "additionalFields": {
+            "Story Points": "5"
+          }
         }
       ]
     }
   ]
 }`;
+    }
+    
+    // Find enabled work item types and build a hierarchy based on available mappings
+    const enabledTypes = teamMapping.workItemTypes.filter(t => t.enabled);
+    if (enabledTypes.length === 0) return '{}';
+    
+    // Get hierarchy information if available
+    let hierarchy: Array<{parentType: string, childType: string}> = [];
+    if ('hierarchies' in teamMapping && teamMapping.hierarchies && Array.isArray(teamMapping.hierarchies)) {
+      hierarchy = teamMapping.hierarchies;
+    }
+    
+    // Try to build a realistic hierarchy example
+    const rootType = (() => {
+      // First check if hierarchies are defined
+      if (hierarchy.length > 0) {
+        // Find types that are only parents
+        const childTypes = hierarchy.map(h => h.childType);
+        const parentTypes = hierarchy.map(h => h.parentType)
+          .filter(p => !childTypes.includes(p));
+        
+        if (parentTypes.length > 0) {
+          // Use the first parent type that's enabled
+          const enabledParent = enabledTypes.find(t => parentTypes.includes(t.name));
+          if (enabledParent) return enabledParent;
+        }
+      }
+      
+      // Fallbacks if hierarchy not found
+      const epicType = enabledTypes.find(t => t.name.toLowerCase().includes('epic'));
+      if (epicType) return epicType;
+      
+      // Just use the first type as root
+      return enabledTypes[0];
+    })();
+    
+    // Function to get a child type for a parent type
+    const getChildTypeFor = (parentTypeName: string): WorkItemType | undefined => {
+      if (hierarchy.length > 0) {
+        const childTypeNames = hierarchy
+          .filter(h => h.parentType === parentTypeName)
+          .map(h => h.childType);
+          
+        if (childTypeNames.length > 0) {
+          return enabledTypes.find(t => childTypeNames.includes(t.name));
+        }
+      }
+      
+      // Fallbacks if no hierarchy mappings
+      if (parentTypeName.toLowerCase().includes('epic')) {
+        return enabledTypes.find(t => t.name.toLowerCase().includes('feature'));
+      }
+      if (parentTypeName.toLowerCase().includes('feature')) {
+        return enabledTypes.find(t => 
+          t.name.toLowerCase().includes('story') || 
+          t.name.toLowerCase().includes('backlog'));
+      }
+      if (parentTypeName.toLowerCase().includes('story') || 
+          parentTypeName.toLowerCase().includes('backlog')) {
+        return enabledTypes.find(t => t.name.toLowerCase().includes('task'));
+      }
+      
+      // If all else fails, try to use a different type
+      return enabledTypes.find(t => t.name !== parentTypeName);
+    };
+    
+    // Function to create sample fields for a work item type
+    const getSampleFieldsFor = (type: WorkItemType): Record<string, string> => {
+      const fields: Record<string, string> = {};
+      
+      // Add fields based on what's enabled
+      type.fields.filter(f => f.enabled).forEach((field: WorkItemField) => {
+        const normalizedField = field.name.toLowerCase().replace(/[\s._-]/g, '');
+        
+        // Skip title and description as they're handled separately
+        if (normalizedField.includes('title') || normalizedField.includes('description')) {
+          return;
+        }
+        
+        // Handle various field types
+        if (normalizedField.includes('priority')) {
+          fields[field.displayName || field.name] = "2 - High";
+        }
+        else if (normalizedField.includes('storypoints')) {
+          fields[field.displayName || field.name] = "5";
+        }
+        else if (normalizedField.includes('effort')) {
+          fields[field.displayName || field.name] = "8";
+        }
+        else if (normalizedField.includes('businessvalue')) {
+          fields[field.displayName || field.name] = "7";
+        }
+        else if (normalizedField.includes('remaining') || normalizedField.includes('estimate')) {
+          fields[field.displayName || field.name] = "4";
+        }
+        else if (normalizedField.includes('activity')) {
+          fields[field.displayName || field.name] = "Development";
+        }
+      });
+      
+      return fields;
+    };
+    
+    // Build the example JSON structure
+    let json = {
+      workItems: [
+        {
+          type: rootType.name,
+          title: `Example ${rootType.name}`,
+          description: `This is a sample ${rootType.name.toLowerCase()} description.`,
+          additionalFields: getSampleFieldsFor(rootType),
+          children: []
+        } as WorkItemExample
+      ]
+    };
+    
+    // Add a child level if possible
+    const childType = getChildTypeFor(rootType.name);
+    if (childType) {
+      // Check for acceptance criteria field
+      const hasAcceptanceCriteria = childType.fields.some((f: WorkItemField) => 
+        f.enabled && f.name.toLowerCase().includes('acceptancecriteria'));
+        
+      const childItem: WorkItemExample = {
+        type: childType.name,
+        title: `Example ${childType.name}`,
+        description: `This is a sample ${childType.name.toLowerCase()} description.`,
+        additionalFields: getSampleFieldsFor(childType),
+        children: []
+      };
+      
+      // Add acceptance criteria if that field is enabled
+      if (hasAcceptanceCriteria) {
+        childItem.acceptanceCriteria = "### Acceptance Criteria\\n1. Requirement one is met\\n2. Requirement two is met\\n3. All validations pass";
+      }
+      
+      // Add to parent's children
+      json.workItems[0].children.push(childItem);
+      
+      // Try to add another level
+      const grandchildType = getChildTypeFor(childType.name);
+      if (grandchildType) {
+        // Check for acceptance criteria field
+        const hasGrandchildAcceptanceCriteria = grandchildType.fields.some((f: WorkItemField) => 
+          f.enabled && f.name.toLowerCase().includes('acceptancecriteria'));
+          
+        const grandchildItem: WorkItemExample = {
+          type: grandchildType.name,
+          title: `Example ${grandchildType.name}`,
+          description: `This is a sample ${grandchildType.name.toLowerCase()} description.`,
+          additionalFields: getSampleFieldsFor(grandchildType),
+          children: []
+        };
+        
+        // Add acceptance criteria if that field is enabled
+        if (hasGrandchildAcceptanceCriteria) {
+          grandchildItem.acceptanceCriteria = "### Acceptance Criteria\\n1. Feature works correctly\\n2. Performance meets requirements\\n3. All edge cases are handled";
+        }
+        
+        // Add to child's children
+        childItem.children.push(grandchildItem);
+      }
+    }
+    
+    return JSON.stringify(json, null, 2);
+  };
+  
+  return generateExampleJson();
+})()}
+\`\`\`
+
+## Important Notes:
+- DO NOT include placeholders like "..." in the final JSON
+- Generate detailed, realistic content for all fields
+- Maintain the EXACT hierarchy from the high-level plan
+- For each Task, estimate appropriate remaining work hours based on complexity
+- Ensure each item has appropriate Type, Title, and Description
+- The JSON must be complete and valid when parsed
+
+Please provide the complete JSON structure containing all work items from the high-level plan.`;
 
                     // Create new AbortController for this request
                     abortControllerRef.current = new AbortController();

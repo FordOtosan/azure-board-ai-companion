@@ -82,14 +82,52 @@ IMPORTANT INSTRUCTIONS:
 3. Format each work item clearly with headers and proper spacing
 4. Use the available work item types and fields as specified above
 5. Make sure each work item has concrete, actionable details
+6. ALWAYS include acceptance criteria for User Stories as a separate field
 
-Example format:
+When later converted to JSON format, your output will be structured like this:
+\`\`\`json
+{
+  "workItems": [
+    {
+      "type": "Epic",
+      "title": "Example Epic",
+      "description": "Description of the epic",
+      "additionalFields": {
+        "Priority": "1",
+        "Effort": 20
+      },
+      "children": [
+        {
+          "type": "Feature",
+          "title": "Example Feature",
+          "description": "Description of the feature",
+          "additionalFields": {
+            "Priority": "2"
+          },
+          "children": [
+            {
+              "type": "User Story",
+              "title": "Example User Story",
+              "description": "As a user, I want to...",
+              "acceptanceCriteria": "1. User can access the feature\\n2. User can complete the action\\n3. System provides appropriate feedback",
+              "additionalFields": {
+                "Story Points": 5
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+\`\`\`
+
+Example format for your response:
 ##PLAN##
 Overview: [Brief description of the overall plan]
 
 Epic: [Title]
 Description: [Detailed description]
-Acceptance Criteria: [Clear criteria]
 Priority: [Priority level]
 
   Feature: [Title] (Child of above Epic)
@@ -97,9 +135,13 @@ Priority: [Priority level]
   Priority: [Priority level]
   Story Points: [Estimate]
 
-    Task: [Title] (Child of above Feature)
-    Description: [Specific task details]
-    Original Estimate: [Time estimate]`;
+    User Story: [Title] (Child of above Feature)
+    Description: [User story in 'As a... I want to... So that...' format]
+    Acceptance Criteria:
+    1. [Clear testable criterion]
+    2. [Another criterion]
+    3. [Final criterion]
+    Story Points: [Estimate]`;
 
     return fullPrompt;
   }
@@ -704,16 +746,29 @@ Priority: [Priority level]
     try {
       // Look for JSON block
       const jsonMatch = response.match(/```json\s*([\s\S]*?)\s*```/);
-      if (jsonMatch && jsonMatch[1]) {
-        // Parse the JSON
-        return JSON.parse(jsonMatch[1]);
-      }
+      const jsonContent = jsonMatch && jsonMatch[1] ? jsonMatch[1] : response;
       
-      // If no JSON block found, try to find anything that looks like JSON
-      const jsonRegex = /\{[\s\S]*"items"[\s\S]*\}/g;
-      const match = response.match(jsonRegex);
+      // Try to find and parse JSON content
+      const jsonRegex = /\{[\s\S]*"workItems"[\s\S]*\}/g;
+      const match = jsonContent.match(jsonRegex);
+      
       if (match) {
-        return JSON.parse(match[0]);
+        // Parse the JSON and validate basic structure
+        const parsedJson = JSON.parse(match[0]);
+        
+        // Ensure we have a workItems array
+        if (parsedJson && Array.isArray(parsedJson.workItems)) {
+          // Transform to expected interface if needed
+          return {
+            items: parsedJson.workItems.map((item: any) => {
+              return {
+                ...item,
+                // Ensure acceptanceCriteria is properly handled
+                acceptanceCriteria: item.acceptanceCriteria || undefined
+              };
+            })
+          };
+        }
       }
       
       return null;

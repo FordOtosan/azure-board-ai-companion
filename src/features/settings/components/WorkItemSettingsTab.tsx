@@ -1,12 +1,8 @@
-import AddIcon from '@mui/icons-material/Add';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EditIcon from '@mui/icons-material/Edit';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import InfoIcon from '@mui/icons-material/Info';
 import {
     Alert,
-    Autocomplete,
     Box,
     Button,
     Checkbox,
@@ -19,6 +15,10 @@ import {
     DialogContentText,
     DialogTitle,
     IconButton,
+    List,
+    ListItem,
+    ListItemIcon,
+    ListItemText,
     Paper,
     Snackbar,
     Table,
@@ -36,6 +36,7 @@ import React, { useEffect, useState } from 'react';
 import { getTeamsInProject } from '../../../services/api/TeamService';
 import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
 import { Language } from '../../../translations';
+import { settingsTranslations } from '../i18n/translations';
 import { LlmSettings, LlmSettingsService } from '../services/LlmSettingsService';
 import {
     TeamWorkItemConfig,
@@ -45,114 +46,8 @@ import {
     WorkItemTypeConfig
 } from '../services/WorkItemSettingsService';
 import '../styles/settings.css';
-
-// Define translations for the component
-const settingsTranslations = {
-  en: {
-    workItemSettings: "Work Item Settings",
-    workItemTypeMapping: "Work Item Type Mapping",
-    workItemPrompts: "Work Item Prompts",
-    loadingSettings: "Loading settings...",
-    addTeamConfig: "Add Team Configuration",
-    noTeamConfigs: "No team configurations found. Click \"Add Team Configuration\" to get started.",
-    teamName: "Team Name",
-    workItemTypes: "Work Item Types",
-    actions: "Actions",
-    viewJsonStructure: "View JSON Structure",
-    edit: "Edit",
-    delete: "Delete",
-    addTeamTitle: "Add Team Configuration",
-    addTeamDescription: "Select a team to configure which work item types should be available.",
-    team: "Team",
-    loadingTeams: "Loading teams...",
-    noTeamsFound: "No teams found",
-    cancel: "Cancel",
-    add: "Add",
-    editTeamTitle: "Edit Team Configuration",
-    editTeamDescription: "Configure which work item types and fields should be available for",
-    workItemTypesAndFields: "Work Item Types and Fields",
-    active: "Active",
-    type: "Type",
-    fieldsStatus: "Fields Status",
-    fieldsToggle: "Fields (click to toggle)",
-    fieldsEnabled: "fields enabled",
-    of: "of",
-    saveChanges: "Save Changes",
-    deleteTeamTitle: "Delete Team Configuration",
-    deleteTeamDescription: "Are you sure you want to delete the configuration for",
-    deleteWarning: "This action cannot be undone.",
-    configureAiProvider: "Please configure an AI provider in the LLM Settings tab before setting up work item prompts.",
-    createPlanPrompt: "Create Plan - System Prompt",
-    createPlanHelper: "Define the instructions given to the AI for generating work item plans.",
-    savingPrompts: "Saving Prompts...",
-    savePrompts: "Save Prompts",
-    mappingExplanation: "If a team has no mapping configuration, the system will consider all work item types and fields by default. You don't need to create mapping if you want to use all possible work item types and fields.",
-    teamExists: "This team already has a configuration",
-    mappingSaved: "Mapping settings saved successfully",
-    mappingSaveError: "Failed to save mapping settings",
-    promptsSaved: "Prompt settings saved successfully",
-    promptsSaveError: "Failed to save prompt settings",
-    loadError: "Failed to load settings or teams data",
-    displayName: "Display Name",
-    systemName: "System Name",
-    passive: "Passive",
-    workItemType: "Work Item",
-    editFields: "Edit Fields for",
-    close: "Close"
-  },
-  tr: {
-    workItemSettings: "İş Öğesi Ayarları",
-    workItemTypeMapping: "İş Öğesi Türü Haritalama",
-    workItemPrompts: "İş Öğesi Komutları",
-    loadingSettings: "Ayarlar yükleniyor...",
-    addTeamConfig: "Takım Yapılandırması Ekle",
-    noTeamConfigs: "Takım yapılandırması bulunamadı. Başlamak için \"Takım Yapılandırması Ekle\"yi tıklayın.",
-    teamName: "Takım Adı",
-    workItemTypes: "İş Öğesi Türleri",
-    actions: "İşlemler",
-    viewJsonStructure: "JSON Yapısını Görüntüle",
-    edit: "Düzenle",
-    delete: "Sil",
-    addTeamTitle: "Takım Yapılandırması Ekle",
-    addTeamDescription: "Hangi iş öğesi türlerinin kullanılabilir olacağını yapılandırmak için bir takım seçin.",
-    team: "Takım",
-    loadingTeams: "Takımlar yükleniyor...",
-    noTeamsFound: "Takım bulunamadı",
-    cancel: "İptal",
-    add: "Ekle",
-    editTeamTitle: "Takım Yapılandırmasını Düzenle",
-    editTeamDescription: "Şu takım için hangi iş öğesi türlerinin ve alanlarının kullanılabilir olacağını yapılandırın:",
-    workItemTypesAndFields: "İş Öğesi Türleri ve Alanları",
-    active: "Aktif",
-    type: "Tür",
-    fieldsStatus: "Alan Durumu",
-    fieldsToggle: "Alanlar (değiştirmek için tıklayın)",
-    fieldsEnabled: "alan etkin",
-    of: "/",
-    saveChanges: "Değişiklikleri Kaydet",
-    deleteTeamTitle: "Takım Yapılandırmasını Sil",
-    deleteTeamDescription: "Şu takımın yapılandırmasını silmek istediğinizden emin misiniz:",
-    deleteWarning: "Bu işlem geri alınamaz.",
-    configureAiProvider: "İş öğesi komutlarını ayarlamadan önce lütfen LLM Ayarları sekmesinde bir yapay zeka sağlayıcısı yapılandırın.",
-    createPlanPrompt: "Plan Oluştur - Sistem Komutu",
-    createPlanHelper: "İş öğesi planları oluşturmak için yapay zekaya verilecek talimatları tanımlayın.",
-    savingPrompts: "Komutlar Kaydediliyor...",
-    savePrompts: "Komutları Kaydet",
-    mappingExplanation: "Bir takımın haritalama yapılandırması yoksa, sistem varsayılan olarak tüm iş öğesi türlerini ve alanlarını dikkate alacaktır. Tüm olası iş öğesi türlerini ve alanlarını kullanmak istiyorsanız haritalama oluşturmanıza gerek yoktur.",
-    teamExists: "Bu takımın zaten bir yapılandırması var",
-    mappingSaved: "Haritalama ayarları başarıyla kaydedildi",
-    mappingSaveError: "Haritalama ayarları kaydedilemedi",
-    promptsSaved: "Komut ayarları başarıyla kaydedildi",
-    promptsSaveError: "Komut ayarları kaydedilemedi",
-    loadError: "Ayarlar veya takım verileri yüklenemedi",
-    displayName: "Görünen Ad",
-    systemName: "Sistem Adı",
-    passive: "Pasif",
-    workItemType: "İş Öğesi",
-    editFields: "Alan Düzenleme:",
-    close: "Kapat"
-  }
-};
+import { DiagnosticsPanel } from './DiagnosticsPanel';
+import { WorkItemMappingManager } from './WorkItemMappingManager';
 
 interface WorkItemSettingsTabProps {
   currentLanguage: Language;
@@ -164,7 +59,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   const T = settingsTranslations[currentLanguage];
 
   // Work Item Mapping state
-  const [workItemSettings, setWorkItemSettings] = useState<WorkItemSettings>({ teamConfigs: [] });
+  const [workItemSettings, setWorkItemSettings] = useState<WorkItemSettings>({ teamConfigs: [], mappings: [] });
   const [workItemLoading, setWorkItemLoading] = useState(true);
   const [workItemSaving, setWorkItemSaving] = useState(false);
   const [teams, setTeams] = useState<WebApiTeam[]>([]);
@@ -183,7 +78,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   const [snackbar, setSnackbar] = useState({
     open: false,
     message: '',
-    severity: 'success' as 'success' | 'error'
+    severity: 'success' as 'success' | 'error' | 'warning' | 'info'
   });
   
   // Collapsible sections state
@@ -205,6 +100,12 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   // Add new state for the JSON structure dialog
   const [jsonDialogOpen, setJsonDialogOpen] = useState(false);
   const [selectedWorkItemTypeInfo, setSelectedWorkItemTypeInfo] = useState<string | null>(null);
+
+  // Add a state for API diagnostics
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+
+  // Add new state for mapping name
+  const [mappingName, setMappingName] = useState('');
 
   // Toggle functions for collapsible sections
   const toggleMappingExpanded = () => {
@@ -307,7 +208,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   };
 
   // Handle adding a new team config
-  const handleAddTeam = () => {
+  const handleAddTeam = async () => {
     if (!selectedTeam) return;
     
     // Check if team already has configuration
@@ -318,35 +219,111 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
     if (existingConfig) {
       setSnackbar({
         open: true,
-        message: 'This team already has a configuration',
+        message: T.teamExists,
         severity: 'error'
       });
       return;
     }
     
-    // Create new config with default work item types
-    const newConfig: TeamWorkItemConfig = {
-      teamId: selectedTeam.id,
-      teamName: selectedTeam.name,
-      workItemTypes: WorkItemSettingsService.getDefaultWorkItemTypes()
-    };
+    setWorkItemSaving(true);
     
-    // Update settings
-    const updatedSettings = WorkItemSettingsService.addOrUpdateTeamConfig(
-      workItemSettings,
-      newConfig
-    );
-    
-    setWorkItemSettings(updatedSettings);
-    setSelectedTeam(null);
-    setAddDialogOpen(false);
-    
-    // Save the updated settings
-    saveWorkItemSettings(updatedSettings);
+    try {
+      console.log(`[WorkItemSettingsTab] Adding team config for ${selectedTeam.name}`);
+      
+      // Get work item types from Azure DevOps with a more reasonable timeout
+      let actualWorkItemTypes: WorkItemTypeConfig[] = [];
+      
+      try {
+        // Try to get work item types with a timeout
+        const timeoutPromise = new Promise<WorkItemTypeConfig[]>((_, reject) => {
+          setTimeout(() => reject(new Error('API request timeout - consider checking your network or Azure DevOps connection')), 60000); // Increase to 60 seconds
+        });
+        
+        // Show intermediate progress notification
+        setSnackbar({
+          open: true,
+          message: "Fetching work item types from Azure DevOps...",
+          severity: 'info'
+        });
+        
+        // Race between the actual fetch and timeout
+        actualWorkItemTypes = await Promise.race([
+          WorkItemSettingsService.getWorkItemTypesFromAzureDevOps(),
+          timeoutPromise
+        ]);
+        
+        console.log(`[WorkItemSettingsTab] Retrieved ${actualWorkItemTypes.length} work item types`);
+        
+        if (actualWorkItemTypes.length === 0) {
+          setSnackbar({
+            open: true,
+            message: "Warning: No work item types found in your Azure DevOps project. Adding team with empty configuration.",
+            severity: 'warning'
+          });
+        }
+      } catch (fetchError) {
+        console.error('[WorkItemSettingsTab] Error fetching work item types:', fetchError);
+        // Provide empty array if fetch fails
+        actualWorkItemTypes = [];
+        
+        // Show warning but continue with empty types
+        setSnackbar({
+          open: true,
+          message: `Error: ${fetchError instanceof Error ? fetchError.message : 'Unable to fetch work item types from Azure DevOps'}. Adding team with empty configuration.`,
+          severity: 'warning'
+        });
+      }
+      
+      // Create new config with fetched work item types (or empty array if fetch failed)
+      const newConfig: TeamWorkItemConfig = {
+        teamId: selectedTeam.id,
+        teamName: selectedTeam.name,
+        workItemTypes: actualWorkItemTypes
+      };
+      
+      console.log(`[WorkItemSettingsTab] Created new config with ${actualWorkItemTypes.length} types`);
+      
+      // Update settings
+      const updatedSettings = WorkItemSettingsService.addOrUpdateTeamConfig(
+        workItemSettings,
+        newConfig
+      );
+      
+      setWorkItemSettings(updatedSettings);
+      setSelectedTeam(null);
+      setAddDialogOpen(false);
+      
+      // Save the updated settings
+      await saveWorkItemSettings(updatedSettings);
+      
+      // Only show success message if we're not already showing a warning
+      if (actualWorkItemTypes.length > 0) {
+        setSnackbar({
+          open: true,
+          message: T.mappingSaved,
+          severity: 'success'
+        });
+      }
+    } catch (error) {
+      console.error('[WorkItemSettingsTab] Error adding team with real work item types:', error);
+      
+      // Show specific error message to the user
+      const errorMessage = error instanceof Error 
+        ? `${T.mappingSaveError}: ${error.message}`
+        : T.mappingSaveError;
+      
+      setSnackbar({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+    } finally {
+      setWorkItemSaving(false);
+    }
   };
 
-  // Handle editing a team config
-  const handleEditTeam = () => {
+  // Handle editing a mapping
+  const handleEditMapping = () => {
     if (!currentConfig) return;
     
     // Update the config with current work item types
@@ -370,8 +347,8 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
     saveWorkItemSettings(updatedSettings);
   };
 
-  // Handle deleting a team config
-  const handleDeleteTeam = () => {
+  // Handle deleting a mapping
+  const handleDeleteMapping = () => {
     if (!currentConfig) return;
     
     // Remove the config
@@ -388,15 +365,15 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
     saveWorkItemSettings(updatedSettings);
   };
 
-  // Open edit dialog for a team config
-  const openEditDialog = (config: TeamWorkItemConfig) => {
+  // Open edit dialog for a mapping
+  const openEditMapping = (config: TeamWorkItemConfig) => {
     setCurrentConfig(config);
     setWorkItemTypes([...config.workItemTypes]);
     setEditDialogOpen(true);
   };
 
-  // Open delete dialog for a team config
-  const openDeleteDialog = (config: TeamWorkItemConfig) => {
+  // Open delete dialog for a mapping
+  const openDeleteMapping = (config: TeamWorkItemConfig) => {
     setCurrentConfig(config);
     setDeleteDialogOpen(true);
   };
@@ -480,6 +457,327 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
     setJsonDialogOpen(true);
   };
 
+  // Update the handleAddMapping function to detect hierarchies
+  const handleAddMapping = async () => {
+    if (!mappingName) return;
+    
+    setWorkItemSaving(true);
+    
+    try {
+      console.log(`[WorkItemSettingsTab] Adding mapping with name: ${mappingName}`);
+      
+      // Get work item types from Azure DevOps
+      let actualWorkItemTypes: WorkItemTypeConfig[] = [];
+      
+      try {
+        // Show intermediate progress notification
+        setSnackbar({
+          open: true,
+          message: "Fetching work item types from Azure DevOps...",
+          severity: 'info'
+        });
+        
+        // Get work item types
+        actualWorkItemTypes = await WorkItemSettingsService.getWorkItemTypesFromAzureDevOps();
+        
+        // Detect hierarchies between work item types
+        console.log('[WorkItemSettingsTab] Detecting hierarchies between work item types...');
+        const hierarchies = WorkItemSettingsService.detectHierarchiesFromTypes(actualWorkItemTypes);
+        
+        // Log detected hierarchies
+        console.log(`[WorkItemSettingsTab] Detected ${hierarchies.length} hierarchical relationships`);
+        hierarchies.forEach(h => {
+          console.log(`[WorkItemSettingsTab] → ${h.parentType} → ${h.childType}`);
+        });
+        
+        // Apply the hierarchies to the work item types
+        actualWorkItemTypes = actualWorkItemTypes.map(type => {
+          // Find all child types for this type
+          const childTypes = hierarchies
+            .filter(h => h.parentType === type.name)
+            .map(h => h.childType);
+          
+          // Add child types if any found
+          if (childTypes.length > 0) {
+            return {
+              ...type,
+              childTypes
+            };
+          }
+          
+          return type;
+        });
+        
+      } catch (error) {
+        console.error('[WorkItemSettingsTab] Error fetching work item types:', error);
+        setSnackbar({
+          open: true,
+          message: `Error fetching work item types: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          severity: 'warning'
+        });
+      }
+      
+      // Create new mapping with project ID as teamId
+      const newMapping: TeamWorkItemConfig = {
+        teamId: "project-level-mapping-" + Date.now(), // Use a project-level identifier
+        teamName: mappingName,
+        workItemTypes: actualWorkItemTypes
+      };
+      
+      // Update settings
+      const updatedSettings = WorkItemSettingsService.addOrUpdateTeamConfig(
+        workItemSettings,
+        newMapping
+      );
+      
+      setWorkItemSettings(updatedSettings);
+      setMappingName('');
+      setAddDialogOpen(false);
+      
+      // Save the updated settings
+      await saveWorkItemSettings(updatedSettings);
+      
+      setSnackbar({
+        open: true,
+        message: "Mapping saved successfully",
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('[WorkItemSettingsTab] Error adding mapping:', error);
+      
+      // Show specific error message to the user
+      const errorMessage = error instanceof Error 
+        ? `Failed to save mapping: ${error.message}`
+        : "Failed to save mapping";
+      
+      setSnackbar({
+        open: true,
+        message: errorMessage,
+        severity: 'error'
+      });
+    } finally {
+      setWorkItemSaving(false);
+    }
+  };
+
+  // Add a small function to show a visual hierarchy icon
+  const HierarchyIcon = () => (
+    <Tooltip title="Shows hierarchical relationships between work item types">
+      <Box
+        component="span"
+        sx={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          mr: 1,
+          color: 'primary.main',
+          '& svg': {
+            fontSize: '1.2rem'
+          }
+        }}
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M4 4h6v6H4V4zm10 0h6v6h-6V4zm-10 10h6v6H4v-6zm10 0h6v6h-6v-6z" />
+          <path d="M14 7h-4v10h4V7z" />
+        </svg>
+      </Box>
+    </Tooltip>
+  );
+
+  // Update the renderHierarchicalWorkItemTypes function to enhance visual appearance
+  const renderHierarchicalWorkItemTypes = (config: TeamWorkItemConfig) => {
+    // Step 1: Identify root types (those not children of any other type)
+    const allChildTypes = config.workItemTypes
+      .filter(type => type.childTypes && type.childTypes.length > 0)
+      .flatMap(type => type.childTypes || []);
+    
+    const rootTypes = config.workItemTypes
+      .filter(type => type.enabled && !allChildTypes.includes(type.name));
+    
+    // Count the total number of enabled types and relationship pairs
+    const enabledTypesCount = config.workItemTypes.filter(type => type.enabled).length;
+    const relationshipCount = config.workItemTypes
+      .filter(type => type.childTypes && type.childTypes.length > 0)
+      .reduce((count, type) => count + (type.childTypes || []).filter(childName => {
+        const childType = config.workItemTypes.find(t => t.name === childName);
+        return childType && childType.enabled;
+      }).length, 0);
+    
+    // Create a summary text
+    const hierarchySummary = (
+      <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+        {enabledTypesCount} work item types with {relationshipCount} parent-child relationships
+      </Typography>
+    );
+    
+    // Step 2: Helper function to render a type with its children
+    const renderTypeWithChildren = (typeName: string, level = 0): React.ReactNode => {
+      const type = config.workItemTypes.find(t => t.name === typeName);
+      if (!type || !type.enabled) return null;
+      
+      const childTypes = type.childTypes || [];
+      const children = childTypes
+        .map(childName => {
+          const childType = config.workItemTypes.find(t => t.name === childName);
+          return childType && childType.enabled ? renderTypeWithChildren(childName, level + 1) : null;
+        })
+        .filter(Boolean);
+      
+      return (
+        <React.Fragment key={typeName}>
+          <Box component="span" sx={{ 
+            display: 'inline-block', 
+            marginLeft: level > 0 ? `${level * 16}px` : 0,
+            position: 'relative',
+            fontWeight: level === 0 ? 'bold' : 'normal',
+            color: level === 0 ? 'primary.main' : 'text.primary',
+            '&:before': level > 0 ? {
+              content: '""',
+              position: 'absolute',
+              left: '-12px',
+              top: '50%',
+              width: '8px',
+              height: '1px',
+              backgroundColor: 'divider'
+            } : {}
+          }}>
+            {typeName}
+          </Box>
+          {children.length > 0 && (
+            <React.Fragment>
+              {level === 0 && children.length > 0 ? ' → ' : ''}
+              {children}
+            </React.Fragment>
+          )}
+          {level === 0 && <br />}
+        </React.Fragment>
+      );
+    };
+    
+    // Step 3: Render all root types with their children
+    return (
+      <Box>
+        {rootTypes.length > 0 ? (
+          <>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+              <HierarchyIcon />
+              <Typography variant="body2" component="span" sx={{ fontWeight: 'medium' }}>
+                Hierarchical View
+              </Typography>
+            </Box>
+            {rootTypes.map(type => renderTypeWithChildren(type.name))}
+            {hierarchySummary}
+          </>
+        ) : (
+          // Fallback for flat list if no hierarchy is detected
+          <>
+            <Typography variant="body2" component="div">
+              {config.workItemTypes
+                .filter(type => type.enabled)
+                .map(type => type.name)
+                .join(', ')}
+            </Typography>
+            {hierarchySummary}
+          </>
+        )}
+      </Box>
+    );
+  };
+
+  // Add a new function to render types in a hierarchical tree for editing
+  const renderWorkItemTypeHierarchy = () => {
+    // Identify root types (those not children of any other type)
+    const allChildTypes = workItemTypes
+      .filter(type => type.childTypes && type.childTypes.length > 0)
+      .flatMap(type => type.childTypes || []);
+    
+    const rootTypes = workItemTypes
+      .filter(type => !allChildTypes.includes(type.name));
+    
+    // Recursive function to render a type and its children
+    const renderTypeNode = (type: WorkItemTypeConfig, level = 0): React.ReactNode => {
+      if (!type) return null;
+      
+      const typeIndex = workItemTypes.findIndex(t => t.name === type.name);
+      const childTypes = type.childTypes || [];
+      const hasChildren = childTypes.length > 0;
+      
+      // Get all child work item type objects
+      const childTypeObjects = childTypes
+        .map(childName => workItemTypes.find(t => t.name === childName))
+        .filter(Boolean); // Remove undefined
+      
+      return (
+        <React.Fragment key={type.name}>
+          <ListItem
+            sx={{ 
+              pl: level * 4,
+              borderLeft: level > 0 ? '1px dashed rgba(0,0,0,0.1)' : 'none',
+              ml: level > 0 ? 1 : 0
+            }}
+          >
+            <ListItemIcon>
+              <Checkbox
+                edge="start"
+                checked={type.enabled}
+                onChange={(e) => {
+                  const newWorkItemTypes = [...workItemTypes];
+                  newWorkItemTypes[typeIndex].enabled = e.target.checked;
+                  setWorkItemTypes(newWorkItemTypes);
+                }}
+                tabIndex={-1}
+                disableRipple
+              />
+            </ListItemIcon>
+            
+            <ListItemText
+              primary={type.name}
+              secondary={
+                <Typography variant="caption" color="text.secondary">
+                  {type.fields.filter(f => f.enabled).length} of {type.fields.length} fields enabled
+                  {hasChildren && ` • Parent of ${childTypes.length} types`}
+                </Typography>
+              }
+            />
+            
+            <Tooltip title="Configure Fields">
+              <Chip
+                label="Fields"
+                size="small"
+                color="primary"
+                variant="outlined"
+                onClick={() => {
+                  // Toggle the fields expansion logic here if needed
+                  const newWorkItemTypes = [...workItemTypes];
+                  const typeIndex = newWorkItemTypes.findIndex(t => t.name === type.name);
+                  
+                  // Open field editor for this type
+                  if (typeIndex !== -1) {
+                    openFieldEditor(type.name);
+                  }
+                }}
+                sx={{ cursor: 'pointer' }}
+              />
+            </Tooltip>
+          </ListItem>
+          
+          {hasChildren && (
+            <List component="div" disablePadding>
+              {childTypeObjects.map(childType => 
+                childType ? renderTypeNode(childType, level + 1) : null
+              )}
+            </List>
+          )}
+        </React.Fragment>
+      );
+    };
+    
+    return (
+      <List sx={{ width: '100%', bgcolor: 'background.paper', mb: 3 }}>
+        {rootTypes.map(type => renderTypeNode(type))}
+      </List>
+    );
+  };
+
   // Show loading indicator while loading initial data
   if (workItemLoading && llmLoading) {
     return (
@@ -497,10 +795,24 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
       </Typography>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
+        <Alert 
+          severity="error" 
+          sx={{ mb: 2 }}
+          action={
+            <Button 
+              color="inherit" 
+              size="small" 
+              onClick={() => setShowDiagnostics(true)}
+            >
+              Run Diagnostics
+            </Button>
+          }
+        >
           {error}
         </Alert>
       )}
+
+      {showDiagnostics && <DiagnosticsPanel />}
 
       {/* Work Item Type Mapping Section */}
       <Paper elevation={2} sx={{ overflow: 'hidden', mb: 3 }}>
@@ -524,81 +836,36 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
         
         <Collapse in={isMappingExpanded} timeout="auto">
           <Box p={2}>
-            {/* Multilingual explanation notice */}
-            <Paper elevation={1} sx={{ p: 2, mb: 3, bgcolor: 'info.light', color: 'info.contrastText' }}>
-              <Typography variant="subtitle2">
-                {T.mappingExplanation}
-              </Typography>
-            </Paper>
-            
-            <Box display="flex" justifyContent="flex-end" mb={2}>
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<AddIcon />}
-                onClick={() => setAddDialogOpen(true)}
-                disabled={teams.length === 0}
-              >
-                {T.addTeamConfig}
-              </Button>
-            </Box>
-            
-            <TableContainer>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell>{T.teamName}</TableCell>
-                    <TableCell>{T.workItemTypes}</TableCell>
-                    <TableCell align="right">{T.actions}</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {workItemSettings.teamConfigs.length > 0 ? (
-                    workItemSettings.teamConfigs.map((config) => (
-                      <TableRow key={config.teamId}>
-                        <TableCell>{config.teamName}</TableCell>
-                        <TableCell>
-                          {config.workItemTypes
-                            .filter(type => type.enabled)
-                            .map(type => type.name)
-                            .join(', ')}
-                        </TableCell>
-                        <TableCell align="right">
-                          <Tooltip title={T.viewJsonStructure}>
-                            <IconButton 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleOpenJsonDialog(config.workItemTypes[0]?.name || 'Work Item');
-                              }}
-                            >
-                              <InfoIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={T.edit}>
-                            <IconButton onClick={() => openEditDialog(config)}>
-                              <EditIcon />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title={T.delete}>
-                            <IconButton onClick={() => openDeleteDialog(config)}>
-                              <DeleteIcon />
-                            </IconButton>
-                          </Tooltip>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  ) : (
-                    <TableRow>
-                      <TableCell colSpan={3} align="center">
-                        <Typography variant="body2" color="textSecondary">
-                          {T.noTeamConfigs}
-                        </Typography>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            {workItemLoading ? (
+              <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
+                <CircularProgress />
+              </Box>
+            ) : (
+              <WorkItemMappingManager
+                settings={workItemSettings}
+                onUpdateSettings={(newSettings) => {
+                  setWorkItemSettings(newSettings);
+                  saveWorkItemSettings(newSettings);
+                }}
+                currentLanguage={currentLanguage}
+                workItemTypesLoading={workItemSaving}
+                onFetchWorkItemTypes={async () => {
+                  try {
+                    const types = await WorkItemSettingsService.getWorkItemTypesFromAzureDevOps();
+                    return types;
+                  } catch (error) {
+                    console.error('Error fetching work item types:', error);
+                    setSnackbar({
+                      open: true,
+                      message: 'Failed to fetch work item types',
+                      severity: 'error'
+                    });
+                    return [];
+                  }
+                }}
+                onEditFields={openFieldEditor}
+              />
+            )}
           </Box>
         </Collapse>
       </Paper>
@@ -660,43 +927,74 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
         </Collapse>
       </Paper>
 
-      {/* Add Team Dialog */}
+      {/* Add Team Dialog - Rename to Add Mapping Dialog */}
       <Dialog open={addDialogOpen} onClose={() => setAddDialogOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>{T.addTeamTitle}</DialogTitle>
+        <DialogTitle>Add Mapping</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {T.addTeamDescription}
+            Add a new work item type mapping for this project. This mapping will define which work item types are available and their hierarchical relationships.
           </DialogContentText>
           <Box sx={{ mt: 2 }}>
-            <Autocomplete
-              options={teams}
-              getOptionLabel={(option) => option.name}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label={T.team}
-                  variant="outlined"
-                  fullWidth
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                />
-              )}
-              value={selectedTeam}
-              onChange={(_event, newValue) => setSelectedTeam(newValue)}
-              loading={loadingTeams}
-              loadingText={T.loadingTeams}
-              noOptionsText={T.noTeamsFound}
+            <TextField
+              fullWidth
+              label="Mapping Name"
+              variant="outlined"
+              value={mappingName || ""}
+              onChange={(e) => setMappingName(e.target.value)}
             />
           </Box>
+          
+          {/* Add info text about the process */}
+          {!workItemSaving && (
+            <Box sx={{ mt: 2, p: 1.5, bgcolor: 'info.light', borderRadius: 1 }}>
+              <Typography variant="body2" color="info.contrastText">
+                <b>Note:</b> Adding a mapping requires fetching work item types and fields from Azure DevOps.
+                This process might take up to a minute depending on your connection and the number of work item types in your project.
+              </Typography>
+            </Box>
+          )}
+          
+          {/* Show more detailed loading state */}
+          {workItemSaving && (
+            <Box sx={{ 
+              mt: 3, 
+              display: 'flex', 
+              flexDirection: 'column', 
+              alignItems: 'center',
+              bgcolor: 'background.paper',
+              p: 2,
+              borderRadius: 1,
+              boxShadow: 1
+            }}>
+              <CircularProgress size={40} />
+              <Typography sx={{ mt: 2, fontWeight: 'medium' }}>
+                Fetching work item types...
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1, textAlign: 'center' }}>
+                This may take a moment. The system is retrieving work item types and their fields from Azure DevOps.
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setAddDialogOpen(false)}>{T.cancel}</Button>
+          <Button 
+            onClick={() => setAddDialogOpen(false)}
+            disabled={workItemSaving}
+          >Cancel</Button>
           <Button
-            onClick={handleAddTeam}
+            onClick={handleAddMapping}
             color="primary"
             variant="contained"
-            disabled={!selectedTeam || workItemSaving}
+            disabled={!mappingName || workItemSaving}
           >
-            {workItemSaving ? <CircularProgress size={24} /> : T.add}
+            {workItemSaving ? (
+              <React.Fragment>
+                <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
+                Processing...
+              </React.Fragment>
+            ) : (
+              "Add"
+            )}
           </Button>
         </DialogActions>
       </Dialog>
@@ -708,92 +1006,39 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
         maxWidth="md" 
         fullWidth
       >
-        <DialogTitle>{T.editTeamTitle}</DialogTitle>
+        <DialogTitle>Edit Mapping</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {T.editTeamDescription} {currentConfig?.teamName}.
+            Configure which work item types and fields should be available in the {currentConfig?.teamName} mapping.
           </DialogContentText>
           
           <Box sx={{ mt: 2 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              {T.workItemTypesAndFields}
+            <Typography variant="subtitle1" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+              Work Item Types Hierarchy
+              <Tooltip title="The hierarchy is automatically detected from Azure DevOps relationships">
+                <InfoIcon fontSize="small" color="info" sx={{ ml: 1 }} />
+              </Tooltip>
             </Typography>
-            <TableContainer component={Paper} sx={{ mb: 3 }}>
-              <Table>
-                <TableHead>
-                  <TableRow>
-                    <TableCell padding="checkbox">{T.active}</TableCell>
-                    <TableCell>{T.type}</TableCell>
-                    <TableCell>{T.fieldsStatus}</TableCell>
-                    <TableCell>{T.fieldsToggle}</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {workItemTypes.map((type, index) => (
-                    <TableRow key={type.name} hover>
-                      <TableCell padding="checkbox">
-                        <Checkbox
-                          checked={type.enabled}
-                          onChange={(e) => {
-                            const newWorkItemTypes = [...workItemTypes];
-                            newWorkItemTypes[index].enabled = e.target.checked;
-                            setWorkItemTypes(newWorkItemTypes);
-                          }}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {type.name}
-                      </TableCell>
-                      <TableCell>
-                        {type.fields.filter(f => f.enabled).length} {T.of} {type.fields.length} {T.fieldsEnabled}
-                      </TableCell>
-                      <TableCell>
-                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-                          {type.fields.map(field => (
-                            <Tooltip key={field.name} title={field.name} arrow placement="top">
-                              <Chip
-                                label={field.displayName}
-                                size="small"
-                                color={field.enabled ? "success" : "default"}
-                                onClick={() => {
-                                  // Toggle the field's enabled status directly
-                                  const newWorkItemTypes = [...workItemTypes];
-                                  const typeIndex = newWorkItemTypes.findIndex(t => t.name === type.name);
-                                  if (typeIndex !== -1) {
-                                    const fieldIndex = newWorkItemTypes[typeIndex].fields.findIndex(f => f.name === field.name);
-                                    if (fieldIndex !== -1) {
-                                      newWorkItemTypes[typeIndex].fields[fieldIndex].enabled = !field.enabled;
-                                      setWorkItemTypes(newWorkItemTypes);
-                                    }
-                                  }
-                                }}
-                                sx={{ 
-                                  opacity: field.enabled ? 1 : 0.7,
-                                  maxWidth: '100px',
-                                  fontSize: '0.7rem',
-                                  cursor: 'pointer'
-                                }}
-                              />
-                            </Tooltip>
-                          ))}
-                        </Box>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
+            
+            <Paper variant="outlined" sx={{ mt: 2, mb: 3 }}>
+              {renderWorkItemTypeHierarchy()}
+            </Paper>
+            
+            <Alert severity="info" sx={{ mb: 2 }}>
+              Parent work item types are shown with their children indented below them. 
+              Click the "Fields" button to configure which fields are enabled for each type.
+            </Alert>
           </Box>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setEditDialogOpen(false)}>{T.cancel}</Button>
+          <Button onClick={() => setEditDialogOpen(false)}>Cancel</Button>
           <Button
-            onClick={handleEditTeam}
+            onClick={handleEditMapping}
             color="primary"
             variant="contained"
             disabled={workItemSaving}
           >
-            {workItemSaving ? <CircularProgress size={24} /> : T.saveChanges}
+            {workItemSaving ? <CircularProgress size={24} /> : 'Save Changes'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -865,22 +1110,22 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
 
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
-        <DialogTitle>{T.deleteTeamTitle}</DialogTitle>
+        <DialogTitle>Delete Mapping</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            {T.deleteTeamDescription} {currentConfig?.teamName}?
-            {T.deleteWarning}
+            Are you sure you want to delete the mapping "{currentConfig?.teamName}"?
+            This action cannot be undone.
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteDialogOpen(false)}>{T.cancel}</Button>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
           <Button
-            onClick={handleDeleteTeam}
+            onClick={handleDeleteMapping}
             color="error"
             variant="contained"
             disabled={workItemSaving}
           >
-            {workItemSaving ? <CircularProgress size={24} /> : T.delete}
+            {workItemSaving ? <CircularProgress size={24} /> : 'Delete'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -893,7 +1138,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
         fullWidth
       >
         <DialogTitle>
-          {T.viewJsonStructure} {selectedWorkItemTypeInfo} {T.workItemType}
+          View JSON Structure for {selectedWorkItemTypeInfo} Work Item Type
         </DialogTitle>
         <DialogContent>
           <Box sx={{ mb: 2, p: 2, bgcolor: 'primary.light', borderRadius: 1 }}>
@@ -997,6 +1242,24 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
           {snackbar.message}
         </Alert>
       </Snackbar>
+
+      {workItemLoading || llmLoading ? (
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mt: 3 }}>
+          <CircularProgress size={24} sx={{ mr: 1 }} />
+          <Typography>{T.loadingSettings}</Typography>
+        </Box>
+      ) : (
+        <Box sx={{ mt: 3, textAlign: 'right' }}>
+          <Button 
+            variant="outlined" 
+            color="primary" 
+            onClick={() => setShowDiagnostics(!showDiagnostics)}
+            sx={{ mr: 2 }}
+          >
+            {showDiagnostics ? 'Hide Diagnostics' : 'Show Diagnostics'}
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 };

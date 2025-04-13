@@ -37,14 +37,16 @@ const componentTranslations = {
     copied: 'Copied!',
     retry: 'Retry this message',
     viewJsonPlan: 'View Work Item Plan',
-    createWorkItems: 'Create Work Items'
+    createWorkItems: 'Create Work Items',
+    showWorkItems: 'Show Work Items'
   },
   tr: {
     copy: 'Mesajı kopyala',
     copied: 'Kopyalandı!',
     retry: 'Bu mesajı yeniden dene',
     viewJsonPlan: 'İş Öğesi Planını Görüntüle',
-    createWorkItems: 'İş Öğeleri Oluştur'
+    createWorkItems: 'İş Öğeleri Oluştur',
+    showWorkItems: 'İş Öğelerini Göster'
   }
 } as const;
 
@@ -212,7 +214,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                          color="primary"
                          onClick={() => onUsePlan?.(msg)}
                        >
-                         {T.createWorkItems}
+                         {T.showWorkItems}
                        </Button>
                      </Box>
                    </Box>
