@@ -42,7 +42,14 @@ export const workItemTranslations = {
     workItemsCreated: 'Work Items Created Successfully',
     viewTopWorkItem: 'View Top Work Item',
     creationComplete: 'Complete',
-    creationProgress: '%% Complete'
+    creationProgress: '%% Complete',
+    // Work item type translations
+    epic: 'Epic',
+    feature: 'Feature',
+    userStory: 'User Story',
+    productBacklogItem: 'Product Backlog Item',
+    task: 'Task',
+    bug: 'Bug'
   },
   tr: {
     createWorkItems: 'İş Öğeleri Oluştur',
@@ -85,7 +92,14 @@ export const workItemTranslations = {
     workItemsCreated: 'İş Öğeleri Başarıyla Oluşturuldu',
     viewTopWorkItem: 'Üst İş Öğesini Görüntüle',
     creationComplete: 'Tamamlandı',
-    creationProgress: '%% Tamamlandı'
+    creationProgress: '%% Tamamlandı',
+    // Work item type translations
+    epic: 'Epik',
+    feature: 'Özellik',
+    userStory: 'Kullanıcı Hikayesi',
+    productBacklogItem: 'Ürün İş Listesi Öğesi',
+    task: 'Görev',
+    bug: 'Hata'
   }
 } as const;
 

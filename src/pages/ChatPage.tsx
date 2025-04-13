@@ -1,24 +1,24 @@
 import {
-    Assessment,
-    Error as ErrorIcon,
-    NoteAdd
+  Assessment,
+  Error as ErrorIcon,
+  NoteAdd
 } from '@mui/icons-material';
 import {
-    Alert,
-    Box,
-    Button,
-    CircularProgress,
-    Container,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogTitle,
-    Fade,
-    Paper,
-    Slide,
-    Snackbar,
-    Typography,
-    useTheme
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Fade,
+  Paper,
+  Slide,
+  Snackbar,
+  Typography,
+  useTheme
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { WebApiTeam } from 'azure-devops-extension-api/Core'; // Restore team type import
@@ -32,7 +32,7 @@ import { TeamSelector } from '../features/chat/components/TeamSelector'; // Rest
 import { WorkItemForm } from '../features/chat/components/WorkItemForm';
 import '../features/chat/styles/chat.css';
 import { LlmConfig, LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
-import { TeamWorkItemConfig, WorkItemMapping, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
+import { TeamWorkItemConfig, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
 import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
 import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
@@ -122,7 +122,7 @@ const ChatPage: React.FC = () => {
   });
 
   // Add new state for team work item mapping
-  const [teamWorkItemMapping, setTeamWorkItemMapping] = React.useState<WorkItemMapping | null>(null);
+  const [teamWorkItemMapping, setTeamWorkItemMapping] = React.useState<TeamWorkItemConfig | null>(null);
 
   React.useEffect(() => {
     // Initialize SDK, get Org/Project info, fetch Teams, and LLM Settings
@@ -224,60 +224,44 @@ const ChatPage: React.FC = () => {
     const loadTeamMapping = async () => {
       if (selectedTeam) {
         try {
+          // Load project-wide settings
           const settings = await WorkItemSettingsService.getSettings();
-          const mapping = settings.teamConfigs.find(config => config.teamId === selectedTeam.id);
-          setTeamMapping(mapping || null);
+          
+          // Get the default mapping or the first available mapping
+          if (settings.mappings && settings.mappings.length > 0) {
+            // First try to get the default mapping
+            const projectMapping = settings.mappings.find(m => m.isDefault) || settings.mappings[0];
+            
+            if (projectMapping) {
+              // Convert WorkItemMapping to TeamWorkItemConfig for backward compatibility
+              const teamConfig: TeamWorkItemConfig = {
+                teamId: selectedTeam.id,
+                teamName: selectedTeam.name,
+                workItemTypes: projectMapping.workItemTypes
+              };
+              setTeamMapping(teamConfig);
+              
+              // Also set the team work item mapping to the same config
+              setTeamWorkItemMapping(teamConfig);
+            } else {
+              setTeamMapping(null);
+              setTeamWorkItemMapping(null);
+            }
+          } else {
+            setTeamMapping(null);
+            setTeamWorkItemMapping(null);
+          }
         } catch (error) {
-          console.error('Error loading team mapping:', error);
+          console.error('Error loading project-wide mapping:', error);
           setTeamMapping(null);
+          setTeamWorkItemMapping(null);
         }
       } else {
         setTeamMapping(null);
+        setTeamWorkItemMapping(null);
       }
     };
 
-    loadTeamMapping();
-  }, [selectedTeam]);
-
-  // Add effect to clear conversation history when team or action changes
-  React.useEffect(() => {
-    // Only clear history when team changes, not when action changes
-    // This allows the LLM to remember previous conversations within the same team context
-    if (selectedTeam) {
-      // Don't clear history completely, just add a context separator if needed
-      const lastMessage = llmHistory[llmHistory.length - 1];
-      if (llmHistory.length > 0 && 
-          (!lastMessage || lastMessage.role !== 'system' || !lastMessage.content.includes('Context Switch'))) {
-        // Add a system message indicating context switch but preserve history
-        setLlmHistory(prev => [...prev, { 
-          role: 'system', 
-          content: `Context Switch: ${selectedAction === 'create_wi' ? 'Work Item Creation' : 'General Chat'}`
-        }]);
-      }
-    } else {
-      // Only clear history when team changes, not just action
-      setLlmHistory([]);
-    }
-  }, [selectedTeam]);
-
-  // Add new effect to load team work item mapping when team is selected
-  React.useEffect(() => {
-    const loadTeamMapping = async () => {
-      if (selectedTeam && selectedTeam.id) {
-        try {
-          // Load the settings
-          const settings = await WorkItemSettingsService.getSettings();
-          if (settings && settings.mappings.length > 0) {
-            // Get the mapping for the selected team
-            const mapping = WorkItemSettingsService.getMappingForTeam(settings, selectedTeam.id);
-            setTeamWorkItemMapping(mapping);
-          }
-        } catch (error) {
-          console.error("Error loading team work item mapping:", error);
-        }
-      }
-    };
-    
     loadTeamMapping();
   }, [selectedTeam]);
 
@@ -295,7 +279,7 @@ const ChatPage: React.FC = () => {
           ...prev, 
           { 
             role: 'system', 
-            content: `NEW TEAM CONTEXT: User has switched to team "${team.name}". Previous conversation may be in a different context.`
+            content: `Context Switch: ${selectedAction === 'create_wi' ? 'Work Item Creation' : 'General Chat'}`
           }
         ];
       }
@@ -1230,6 +1214,8 @@ const ChatPage: React.FC = () => {
                     
                     // Get the plan content
                     const planContent = messageContent;
+                    console.log('[ChatPage] High-level plan content:');
+                    console.log(planContent);
                     
                     // Gather field information for the prompt
                     const fieldInformation = teamMapping?.workItemTypes
@@ -1257,7 +1243,10 @@ const ChatPage: React.FC = () => {
                             }))
                         };
                       });
-
+                      
+                    console.log('[ChatPage] Field information for JSON prompt:');
+                    console.log(JSON.stringify(fieldInformation, null, 2));
+                    
                     // Function to provide reasonable examples for common field types
                     function getFieldExamples(fieldName: string, workItemType: string): string[] {
                       const normalizedField = fieldName.toLowerCase().replace(/[\s._-]/g, '');
@@ -1273,11 +1262,6 @@ const ChatPage: React.FC = () => {
                       // Story Points / Effort examples
                       if (normalizedField.includes('storypoints') || normalizedField.includes('effort')) {
                         return ["1", "2", "3", "5", "8", "13"];
-                      }
-                      
-                      // Priority examples
-                      if (normalizedField.includes('priority')) {
-                        return ["1 - Critical", "2 - High", "3 - Medium", "4 - Low"];
                       }
                       
                       // State examples
@@ -1319,7 +1303,43 @@ ${(() => {
 ${teamMapping.hierarchies.map((h: {parentType: string, childType: string}) => 
   `- ${h.parentType} can contain ${h.childType}`).join('\n')}`;
   }
-  return 'Follow standard hierarchical structure (Epics contain Features, Features contain User Stories/Product Backlog Items, User Stories contain Tasks)';
+  
+  // If no explicit hierarchies are defined, create a sensible default based on available types
+  const workItemTypes = teamMapping?.workItemTypes?.filter(t => t.enabled).map(t => t.name) || [];
+  
+  // Find if we have the common types
+  const hasEpic = workItemTypes.some(t => t === 'Epic');
+  const hasFeature = workItemTypes.some(t => t === 'Feature');
+  const hasPBI = workItemTypes.some(t => t === 'Product Backlog Item');
+  const hasUserStory = workItemTypes.some(t => t === 'User Story');
+  const hasTask = workItemTypes.some(t => t === 'Task');
+  
+  // Create a hierarchy description based on available types
+  let hierarchyParts = [];
+  
+  if (hasEpic && hasFeature) {
+    hierarchyParts.push('Epics contain Features');
+  }
+  
+  if (hasFeature) {
+    if (hasPBI) {
+      hierarchyParts.push('Features contain Product Backlog Items');
+    } else if (hasUserStory) {
+      hierarchyParts.push('Features contain User Stories');
+    }
+  }
+  
+  if (hasPBI && hasTask) {
+    hierarchyParts.push('Product Backlog Items contain Tasks');
+  } else if (hasUserStory && hasTask) {
+    hierarchyParts.push('User Stories contain Tasks');
+  }
+  
+  if (hierarchyParts.length > 0) {
+    return `Follow standard hierarchical structure (${hierarchyParts.join(', ')})`;
+  }
+  
+  return 'Follow standard hierarchical structure (Epics contain Features, Features contain Product Backlog Items/User Stories, Product Backlog Items contain Tasks)';
 })()}
 
 ## Field Requirements by Work Item Type:
@@ -1333,27 +1353,20 @@ ${fieldInformation?.map(type =>
     `- **${field.name}${field.required ? ' (Required)' : ''}**: ${field.description || ''}
     - **Examples:** ${field.examples.join(' | ')}`
   ).join('\n  ')}`
-).join('\n\n') || `### Default Fields for All Types
+).join('\n\n') || (() => {
+  // Generate field requirements based on the available work item types
+  const workItemTypes = teamMapping?.workItemTypes?.filter(t => t.enabled).map(t => t.name) || ['Epic', 'Feature', 'Product Backlog Item', 'Task', 'Bug'];
+  
+  return `### Default Fields for All Types
 - **Title (Required)**: Short, descriptive title
 - **Description (Required)**: Detailed explanation
 
-### Epic
-- **Priority**: 1 - Critical, 2 - High, 3 - Medium, 4 - Low
-- **Business Value**: 1-10 scale representing value to business
-
-### Feature
-- **Acceptance Criteria**: Clear criteria for what makes this feature complete
-- **Effort**: 1, 2, 3, 5, 8, 13, 21
-- **Priority**: 1 - Critical, 2 - High, 3 - Medium, 4 - Low
-
-### User Story/Product Backlog Item
-- **Acceptance Criteria**: Clear criteria for what makes this story complete
-- **Story Points**: 1, 2, 3, 5, 8, 13
-- **Priority**: 1 - Critical, 2 - High, 3 - Medium, 4 - Low
-
-### Task
-- **Activity**: Development, Testing, Documentation, Design, Analysis
-- **Remaining Work**: Estimated hours remaining (like 1, 2, 4, 8)`}
+${workItemTypes.map(type => `### ${type}
+${type.includes('Product Backlog Item') || type.includes('User Story') ? '- **Acceptance Criteria**: Clear criteria for what makes this item complete\n- **Story Points**: 1, 2, 3, 5, 8, 13' : ''}
+${type.includes('Feature') ? '- **Acceptance Criteria**: Clear criteria for what makes this feature complete' : ''}
+${type.includes('Task') ? '- **Activity**: Development, Testing, Documentation, Design, Analysis\n- **Remaining Work**: Estimated hours remaining (like 1, 2, 4, 8)' : ''}
+${type.includes('Bug') ? '- **Repro Steps**: Steps to reproduce the bug\n- **Severity**: Critical, High, Medium, Low' : ''}`).join('\n\n')}`
+})()}
 
 ## Special Instructions:
 1. Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}
@@ -1377,7 +1390,20 @@ ${fieldInformation?.map(type =>
       if (typesWithAcceptanceCriteria.length > 0) {
         return `For ${typesWithAcceptanceCriteria.join(', ')} work items, always include detailed acceptance criteria`;
       } else {
-        return 'For User Stories/Product Backlog Items, always include detailed acceptance criteria';
+        // Check which work item types we have enabled
+        const workItemTypes = teamMapping?.workItemTypes?.filter(t => t.enabled).map(t => t.name) || [];
+        const hasPBI = workItemTypes.some(t => t === 'Product Backlog Item');
+        const hasUserStory = workItemTypes.some(t => t === 'User Story');
+        
+        if (hasPBI) {
+          return hasUserStory 
+            ? 'For Product Backlog Items and User Stories, always include detailed acceptance criteria'
+            : 'For Product Backlog Items, always include detailed acceptance criteria';
+        } else if (hasUserStory) {
+          return 'For User Stories, always include detailed acceptance criteria';
+        }
+        
+        return 'For requirement-type work items, always include detailed acceptance criteria';
       }
     })()}
 7. Assign appropriate field values based on the work item context
@@ -1389,6 +1415,8 @@ ${fieldInformation?.map(type =>
 ${(() => {
   // Generate a dynamic JSON example based on the team's actual configuration
   const generateExampleJson = () => {
+    console.log('[ChatPage] Generating JSON example based on team mapping');
+    
     // Define interfaces for our objects
     interface WorkItemField {
       name: string;
@@ -1413,36 +1441,20 @@ ${(() => {
       children: WorkItemExample[];
     }
 
-    // Default structure if no team mapping is available
+    // Throw an error if no team mapping is available instead of providing default values
     if (!teamMapping || !teamMapping.workItemTypes) {
-      return `{
-  "workItems": [
-    {
-      "type": "Epic",
-      "title": "Vehicle Management",
-      "description": "Comprehensive system for managing vehicle data.",
-      "additionalFields": {
-        "Priority": "2 - High"
-      },
-      "children": [
-        {
-          "type": "User Story",
-          "title": "Create Vehicle Record",
-          "description": "Allow users to create new vehicle records.",
-          "acceptanceCriteria": "### Acceptance Criteria\\n1. User can enter all vehicle details\\n2. Data is validated\\n3. Record is saved correctly",
-          "additionalFields": {
-            "Story Points": "5"
-          }
-        }
-      ]
-    }
-  ]
-}`;
+      console.error('[ChatPage] No team mapping available for JSON example generation');
+      return '{}';
     }
     
     // Find enabled work item types and build a hierarchy based on available mappings
     const enabledTypes = teamMapping.workItemTypes.filter(t => t.enabled);
-    if (enabledTypes.length === 0) return '{}';
+    console.log(`[ChatPage] Found ${enabledTypes.length} enabled work item types: ${enabledTypes.map(t => t.name).join(', ')}`);
+    
+    if (enabledTypes.length === 0) {
+      console.error('[ChatPage] No enabled work item types found');
+      return '{}';
+    }
     
     // Get hierarchy information if available
     let hierarchy: Array<{parentType: string, childType: string}> = [];
@@ -1491,9 +1503,11 @@ ${(() => {
         return enabledTypes.find(t => t.name.toLowerCase().includes('feature'));
       }
       if (parentTypeName.toLowerCase().includes('feature')) {
-        return enabledTypes.find(t => 
-          t.name.toLowerCase().includes('story') || 
-          t.name.toLowerCase().includes('backlog'));
+        // Check for Product Backlog Item first, then User Story
+        const pbiType = enabledTypes.find(t => t.name.toLowerCase().includes('backlog'));
+        if (pbiType) return pbiType;
+        
+        return enabledTypes.find(t => t.name.toLowerCase().includes('story'));
       }
       if (parentTypeName.toLowerCase().includes('story') || 
           parentTypeName.toLowerCase().includes('backlog')) {
@@ -1602,7 +1616,11 @@ ${(() => {
       }
     }
     
-    return JSON.stringify(json, null, 2);
+    const exampleJson = JSON.stringify(json, null, 2);
+    console.log('[ChatPage] JSON Example generated:');
+    console.log(exampleJson);
+    
+    return exampleJson;
   };
   
   return generateExampleJson();

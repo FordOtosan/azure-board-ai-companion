@@ -24,7 +24,7 @@ STRICT RULES:
 
 IMPORTANT: If the request includes document content, use it to build a structured plan. DO NOT respond that you cannot access files - the content has already been provided to you.
 
-For development-related requests, ALWAYS include these tasks under each User Story:
+For development-related requests, ALWAYS include these tasks under each Product Backlog Item:
 - Task: Technical Analysis
 - Task: Backend Development
 - Task: Frontend Development
@@ -59,6 +59,13 @@ Example for a non-development request:
     messageHistory: ChatMessage[] = [],
     teamConfig?: TeamWorkItemConfig | WorkItemMapping | null
   ): Promise<string> {
+    console.log('[HighLevelPlanService] Generating high-level plan');
+    console.log(`[HighLevelPlanService] Using LLM provider: ${config.provider}`);
+    console.log(`[HighLevelPlanService] Content length: ${content.length} chars`);
+    if (fileContent) {
+      console.log(`[HighLevelPlanService] File content length: ${fileContent.length} chars`);
+    }
+    
     // Get the prompt with configured work item types
     const prompt = this.buildHighLevelPlanPrompt(teamConfig);
     
@@ -66,6 +73,7 @@ Example for a non-development request:
     // Check if the content looks like a document (longer than 1000 characters, contains multiple paragraphs)
     if (content.length > 1000 && content.split('\n').length > 5) {
       isDocumentContent = true;
+      console.log('[HighLevelPlanService] Content detected as document content');
     }
 
     let fullPrompt = prompt;
@@ -83,6 +91,10 @@ Example for a non-development request:
       fullPrompt += `\n\nIMPORTANT: The above is document content that has been provided to you. Create a structured plan based on this content. DO NOT respond that you cannot access the document.`;
     }
 
+    console.log('[HighLevelPlanService] Final prompt with user content (first 500 chars):');
+    console.log(fullPrompt.substring(0, 500) + '...');
+    console.log(`[HighLevelPlanService] Total prompt length: ${fullPrompt.length} chars`);
+    
     try {
       // We need to handle message history differently based on the provider
       let fullMessageHistory: ChatMessage[] = [];
@@ -97,10 +109,12 @@ Example for a non-development request:
         
         // Combine the single system message with the non-system messages
         fullMessageHistory = [systemPrompt, ...nonSystemMessages];
+        console.log(`[HighLevelPlanService] Using Gemini format with ${nonSystemMessages.length} non-system messages`);
       } else {
         // For other providers (OpenAI, Azure), we can include multiple system messages
         const systemPrompt: ChatMessage = { role: 'system', content: fullPrompt };
         fullMessageHistory = [systemPrompt, ...messageHistory];
+        console.log(`[HighLevelPlanService] Using standard format with ${messageHistory.length} history messages`);
       }
         
       // If we have history, use streamPromptToLlm for better context handling
@@ -166,8 +180,10 @@ Example for a non-development request:
    * @returns Formatted high-level plan prompt
    */
   private static buildHighLevelPlanPrompt(teamConfig?: TeamWorkItemConfig | WorkItemMapping | null): string {
+    console.log('[HighLevelPlanService] Building high-level plan prompt');
+    
     // Default work item types if no team config provided
-    const defaultTypes = ['Epic', 'Feature', 'User Story', 'Task'];
+    const defaultTypes = ['Epic', 'Feature', 'Product Backlog Item', 'Task'];
     
     // Get enabled work item types from team config if available
     let workItemTypes: string[] = defaultTypes;
@@ -289,7 +305,7 @@ Example for a non-development request:
             const secondLevelType = secondLevelTypes[0];
             devExampleLines.push(`  ${secondLevelType}: Vehicle Definition Screen`);
             
-            // For each potential third level (e.g., User Stories)
+            // For each potential third level (e.g., Product Backlog Items)
             const thirdLevelTypes = parentToChildMap[secondLevelType];
             if (thirdLevelTypes && thirdLevelTypes.length > 0) {
               const thirdLevelType = thirdLevelTypes[0];
@@ -363,12 +379,29 @@ Example for a non-development request:
     }
     
     // Replace placeholders in the template
-    return this.HIGH_LEVEL_PLAN_PROMPT_TEMPLATE
+    const finalPrompt = this.HIGH_LEVEL_PLAN_PROMPT_TEMPLATE
       .replace('{workItemTypesExample}', workItemTypesExample)
       .replace('{workItemTypesList}', workItemTypesList)
       .replace('{hierarchyInstructions}', hierarchyInstructions)
       .replace('{developmentExample}', developmentExample)
       .replace('{nonDevelopmentExample}', nonDevelopmentExample);
+      
+    // Log all variables and the final prompt
+    console.log('==== HIGH LEVEL PLAN PROMPT VARIABLES ====');
+    console.log(`workItemTypes: ${JSON.stringify(workItemTypes)}`);
+    console.log(`workItemTypesList: ${workItemTypesList}`);
+    console.log(`hierarchyInstructions: ${hierarchyInstructions}`);
+    console.log('\nworkItemTypesExample:');
+    console.log(workItemTypesExample);
+    console.log('\ndevelopmentExample:');
+    console.log(developmentExample);
+    console.log('\nnonDevelopmentExample:');
+    console.log(nonDevelopmentExample);
+    console.log('\n==== FULL HIGH LEVEL PLAN PROMPT ====');
+    console.log(finalPrompt);
+    console.log('=======================================');
+    
+    return finalPrompt;
   }
 
   /**
@@ -585,16 +618,53 @@ Example for a non-development request:
    * Create simple hierarchy examples
    */
   private static createSimpleHierarchyExamples(workItemTypes: string[]): string {
-    if (workItemTypes.length < 2) {
-      return `${workItemTypes[0] || 'Work Item'}: Main Project`;
-    }
+    // Check if we have the necessary work item types for a proper hierarchy
+    const hasEpic = workItemTypes.includes('Epic');
+    const hasFeature = workItemTypes.includes('Feature');
+    const hasPBI = workItemTypes.includes('Product Backlog Item');
+    const hasTask = workItemTypes.includes('Task');
+    const hasBug = workItemTypes.includes('Bug');
     
     const lines: string[] = [];
-    lines.push(`${workItemTypes[0]}: Main Project`);
     
-    for (let i = 1; i < workItemTypes.length; i++) {
-      const indent = i * 2;
-      lines.push(`${' '.repeat(indent)}${workItemTypes[i]}: Sub Item Level ${i}`);
+    // Create the correct hierarchy based on the available types
+    if (hasEpic) {
+      lines.push('Epic: Project Management System');
+      
+      if (hasFeature) {
+        lines.push('  Feature: User Authentication Module');
+        
+        if (hasPBI) {
+          lines.push('    Product Backlog Item: Implement Login Screen');
+          
+          if (hasTask) {
+            lines.push('      Task: Technical Analysis');
+            lines.push('      Task: Backend Development');
+            lines.push('      Task: Frontend Development');
+          }
+        }
+      }
+    }
+    
+    // Add Bug with tasks as a separate hierarchy
+    if (hasBug) {
+      if (lines.length > 0) {
+        // Add an empty line for clarity if we already have an Epic hierarchy
+        lines.push('');
+      }
+      
+      lines.push('Bug: Login Form Validation Error');
+      
+      if (hasTask) {
+        lines.push('  Task: Reproduce Issue');
+        lines.push('  Task: Fix Validation Logic');
+        lines.push('  Task: Add Unit Tests');
+      }
+    }
+    
+    // If we couldn't create a proper hierarchy, fall back to a simple list
+    if (lines.length === 0) {
+      return workItemTypes.map(type => `${type}: Sample ${type} Title`).join('\n');
     }
     
     return lines.join('\n');
@@ -604,39 +674,83 @@ Example for a non-development request:
    * Create simple development example
    */
   private static createSimpleDevelopmentExample(workItemTypes: string[]): string {
-    if (workItemTypes.length < 2) {
-      return `${workItemTypes[0] || 'Work Item'}: Vehicle Management System`;
-    }
+    // Check if we have the necessary work item types for a proper hierarchy
+    const hasEpic = workItemTypes.includes('Epic');
+    const hasFeature = workItemTypes.includes('Feature');
+    const hasPBI = workItemTypes.includes('Product Backlog Item');
+    const hasUserStory = workItemTypes.includes('User Story');
+    const hasTask = workItemTypes.includes('Task');
+    
+    // Use the correct requirement type based on availability
+    const requirementType = hasPBI ? 'Product Backlog Item' : (hasUserStory ? 'User Story' : null);
     
     const lines: string[] = [];
-    lines.push(`${workItemTypes[0]}: Vehicle Management System`);
     
-    if (workItemTypes.length >= 2) {
-      lines.push(`  ${workItemTypes[1]}: Vehicle Definition Module`);
-    }
-    
-    if (workItemTypes.length >= 3) {
-      lines.push(`    ${workItemTypes[2]}: Implement Vehicle Definition Screen`);
-    }
-    
-    // Add tasks at the fourth level
-    if (workItemTypes.length >= 4) {
-      lines.push(`      ${workItemTypes[3]}: Technical Analysis`);
-      lines.push(`      ${workItemTypes[3]}: Backend Development`);
-      lines.push(`      ${workItemTypes[3]}: Frontend Development`);
-      lines.push(`      ${workItemTypes[3]}: Database Design`);
-      lines.push(`      ${workItemTypes[3]}: Unit Tests`);
-      lines.push(`      ${workItemTypes[3]}: Code Review`);
-      lines.push(`      ${workItemTypes[3]}: Functional Testing`);
-    } else if (workItemTypes.includes('Task')) {
-      // If there's no fourth level but we have Task type, use it
-      lines.push(`      Task: Technical Analysis`);
-      lines.push(`      Task: Backend Development`);
-      lines.push(`      Task: Frontend Development`);
-      lines.push(`      Task: Database Design`);
-      lines.push(`      Task: Unit Tests`);
-      lines.push(`      Task: Code Review`);
-      lines.push(`      Task: Functional Testing`);
+    // Create proper hierarchy for a development example
+    if (hasEpic) {
+      lines.push('Epic: Vehicle Management System');
+      
+      if (hasFeature) {
+        lines.push('  Feature: Vehicle Definition Module');
+        
+        if (requirementType) {
+          lines.push(`    ${requirementType}: Implement Vehicle Definition Screen`);
+          
+          if (hasTask) {
+            lines.push('      Task: Technical Analysis');
+            lines.push('      Task: Backend Development');
+            lines.push('      Task: Frontend Development');
+            lines.push('      Task: Database Design');
+            lines.push('      Task: Unit Tests');
+            lines.push('      Task: Code Review');
+            lines.push('      Task: Functional Testing');
+          }
+        }
+      }
+    } else if (hasFeature) {
+      // No Epic, start with Feature
+      lines.push('Feature: Vehicle Definition Module');
+      
+      if (requirementType) {
+        lines.push(`  ${requirementType}: Implement Vehicle Definition Screen`);
+        
+        if (hasTask) {
+          lines.push('    Task: Technical Analysis');
+          lines.push('    Task: Backend Development');
+          lines.push('    Task: Frontend Development');
+          lines.push('    Task: Database Design');
+          lines.push('    Task: Unit Tests');
+          lines.push('    Task: Code Review');
+          lines.push('    Task: Functional Testing');
+        }
+      }
+    } else if (requirementType) {
+      // No Epic or Feature, start with PBI/User Story
+      lines.push(`${requirementType}: Implement Vehicle Definition Screen`);
+      
+      if (hasTask) {
+        lines.push('  Task: Technical Analysis');
+        lines.push('  Task: Backend Development');
+        lines.push('  Task: Frontend Development');
+        lines.push('  Task: Database Design');
+        lines.push('  Task: Unit Tests');
+        lines.push('  Task: Code Review');
+        lines.push('  Task: Functional Testing');
+      }
+    } else if (workItemTypes.length > 0) {
+      // Fallback to the available types
+      lines.push(`${workItemTypes[0]}: Vehicle Management System`);
+      
+      // Add tasks if available
+      if (hasTask) {
+        lines.push('  Task: Technical Analysis');
+        lines.push('  Task: Backend Development');
+        lines.push('  Task: Frontend Development');
+        lines.push('  Task: Database Design');
+        lines.push('  Task: Unit Tests');
+        lines.push('  Task: Code Review');
+        lines.push('  Task: Functional Testing');
+      }
     }
     
     return lines.join('\n');
@@ -646,26 +760,58 @@ Example for a non-development request:
    * Create simple non-development example
    */
   private static createSimpleNonDevExample(workItemTypes: string[]): string {
-    if (workItemTypes.length < 2) {
-      return `${workItemTypes[0] || 'Work Item'}: Annual Marketing Campaign`;
-    }
+    // Check if we have the necessary work item types for a proper hierarchy
+    const hasEpic = workItemTypes.includes('Epic');
+    const hasFeature = workItemTypes.includes('Feature');
+    const hasPBI = workItemTypes.includes('Product Backlog Item');
+    const hasTask = workItemTypes.includes('Task');
+    const hasBug = workItemTypes.includes('Bug');
     
     const lines: string[] = [];
-    lines.push(`${workItemTypes[0]}: Annual Marketing Campaign`);
     
-    if (workItemTypes.length >= 2) {
-      lines.push(`  ${workItemTypes[1]}: Social Media Strategy`);
+    // Create proper hierarchy for a non-development example
+    if (hasEpic) {
+      lines.push('Epic: Annual Marketing Campaign');
+      
+      if (hasFeature) {
+        lines.push('  Feature: Social Media Strategy');
+        
+        if (hasPBI) {
+          lines.push('    Product Backlog Item: Twitter Engagement Campaign');
+          
+          if (hasTask) {
+            lines.push('      Task: Create Content Calendar');
+            lines.push('      Task: Design Graphic Templates');
+            lines.push('      Task: Schedule Posts');
+          }
+        }
+      }
     }
     
-    if (workItemTypes.length >= 3) {
-      lines.push(`    ${workItemTypes[2]}: Twitter Engagement Campaign`);
+    // Add Bug example if appropriate
+    if (hasBug && lines.length > 0) {
+      lines.push('');
+      lines.push('Bug: Incorrect Social Media Image Sizing');
+      
+      if (hasTask) {
+        lines.push('  Task: Investigate Image Rendering');
+        lines.push('  Task: Fix Image Resizing Algorithm');
+        lines.push('  Task: Validate on Multiple Platforms');
+      }
     }
     
-    // Add specific items at the fourth level
-    if (workItemTypes.length >= 4) {
-      lines.push(`      ${workItemTypes[3]}: Create Content Calendar`);
-      lines.push(`      ${workItemTypes[3]}: Design Graphic Templates`);
-      lines.push(`      ${workItemTypes[3]}: Schedule Posts`);
+    // Fallback if we couldn't create a proper hierarchy
+    if (lines.length === 0) {
+      if (workItemTypes.length > 0) {
+        lines.push(`${workItemTypes[0]}: Annual Marketing Campaign`);
+        
+        // If we have a second type, add it as a child
+        if (workItemTypes.length > 1) {
+          lines.push(`  ${workItemTypes[1]}: Social Media Strategy`);
+        }
+      } else {
+        lines.push('Epic: Annual Marketing Campaign');
+      }
     }
     
     return lines.join('\n');

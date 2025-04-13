@@ -1,22 +1,22 @@
 import { Add as AddIcon, Launch as LaunchIcon } from '@mui/icons-material';
 import {
-    Alert,
-    Box,
-    Button,
-    Card,
-    CircularProgress,
-    Dialog,
-    DialogContent,
-    DialogTitle,
-    LinearProgress,
-    Snackbar,
-    Typography,
-    useTheme
+  Alert,
+  Box,
+  Button,
+  Card,
+  CircularProgress,
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  LinearProgress,
+  Snackbar,
+  Typography,
+  useTheme
 } from '@mui/material';
 import * as React from 'react';
-import { getTeamsInProject } from '../../../services/api/TeamService';
-import { WorkItemCreationResult, WorkItemService } from '../../../services/api/WorkItemService';
+import { WorkItemCreationResult } from '../../../services/api/WorkItemService';
 import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
+import { AzureDevOpsSdkService } from '../../../services/sdk/AzureDevOpsSdkService';
 import { WorkItemProvider, useWorkItemContext } from '../context/WorkItemContext';
 import { useWorkItemRefinement } from '../hooks/useWorkItemRefinement';
 import { getTranslations } from '../i18n/translations';
@@ -165,6 +165,140 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
     });
   };
 
+  // Create a work item in Azure DevOps using direct API calls
+  const createWorkItem = async (type: string, fields: Record<string, any>, projectId: string): Promise<any> => {
+    try {
+      // Get access token from the Azure DevOps SDK
+      const accessToken = await getAccessToken();
+      
+      // Format as JSON Patch operations
+      const patchDocument = Object.entries(fields).map(([key, value]) => ({
+        op: "add",
+        path: `/fields/${key}`,
+        value: value
+      }));
+
+      // Get organization name
+      const { organizationName } = await getOrganizationAndProject();
+      
+      // API call using fetch
+      const url = `https://dev.azure.com/${organizationName}/${projectId}/_apis/wit/workitems/$${type}?api-version=7.0`;
+      
+      // Log patch document for debugging
+      console.log(`Patch document for work item ${type} - ${fields['System.Title']}:`, JSON.stringify(patchDocument, null, 2));
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json-patch+json'
+        },
+        body: JSON.stringify(patchDocument)
+      });
+      
+      if (!response.ok) {
+        const responseText = await response.text();
+        console.error(`Azure DevOps API error response for ${type} - ${fields['System.Title']}:`, responseText);
+        
+        let errorMessage = `Failed to create work item: ${response.status} ${response.statusText}`;
+        
+        try {
+          const errorJson = JSON.parse(responseText);
+          if (errorJson.message) {
+            errorMessage = errorJson.message;
+          }
+          
+          // Check for field validation errors
+          if (errorJson.value && Array.isArray(errorJson.value)) {
+            const fieldErrors = errorJson.value
+              .filter((v: any) => v.message)
+              .map((v: any) => v.message)
+              .join("; ");
+            
+            if (fieldErrors) {
+              errorMessage = `${errorMessage} - Field errors: ${fieldErrors}`;
+            }
+          }
+        } catch (jsonError) {
+          // Not a JSON response
+          if (responseText) {
+            errorMessage = `${errorMessage} - ${responseText}`;
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+      
+      return await response.json();
+    } catch (error) {
+      console.error('Error creating work item:', error);
+      throw error;
+    }
+  };
+
+  // Helper function to get access token from Azure DevOps SDK
+  const getAccessToken = async (): Promise<string> => {
+    try {
+      // This is a placeholder - you'll need to implement this based on your authentication setup
+      // You might already have a function in your SDK service to get the access token
+      // For example, it might look like:
+      const accessToken = await AzureDevOpsSdkService.getAccessToken();
+      return accessToken;
+    } catch (error) {
+      console.error('Error getting access token:', error);
+      throw new Error('Failed to get access token');
+    }
+  };
+
+  // Helper function to create a parent-child relationship
+  const createParentChildLink = async (childId: number, parentId: number, projectId: string): Promise<void> => {
+    try {
+      const accessToken = await getAccessToken();
+      const { organizationName } = await getOrganizationAndProject();
+      
+      // Create link patch document
+      const linkPatchDocument = [
+        {
+          op: "add",
+          path: "/relations/-",
+          value: {
+            rel: "System.LinkTypes.Hierarchy-Reverse",
+            url: `https://dev.azure.com/${organizationName}/_apis/wit/workItems/${parentId}`
+          }
+        }
+      ];
+      
+      console.log(`Linking child work item #${childId} to parent #${parentId}`);
+      
+      const url = `https://dev.azure.com/${organizationName}/${projectId}/_apis/wit/workitems/${childId}?api-version=7.0`;
+      
+      const response = await fetch(url, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json-patch+json'
+        },
+        body: JSON.stringify(linkPatchDocument)
+      });
+      
+      if (!response.ok) {
+        const responseText = await response.text();
+        console.error(`Failed to link work items ${childId} to ${parentId}:`, responseText);
+        throw new Error(`Failed to link work items: ${response.status} ${response.statusText}`);
+      }
+      
+      console.log(`Successfully linked work item #${childId} to parent #${parentId}`);
+    } catch (error) {
+      console.error('Error creating parent-child link:', error);
+      throw error;
+    }
+  };
+
+  // Helper function to add a delay between API calls
+  const delay = (ms: number): Promise<void> => {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  };
+
   // Handle submitting work items to Azure DevOps
   const handleCreateWorkItems = async () => {
     if (workItems.length === 0) return;
@@ -182,16 +316,7 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         throw new Error('Failed to get organization or project information');
       }
       
-      // Get team context (using first team for simplicity)
-      const teams = await getTeamsInProject(organizationName, projectName);
-      
-      if (!teams || teams.length === 0) {
-        throw new Error('No teams found in the current project');
-      }
-      
-      const teamContext = teams[0];
-      
-      // Convert work items to the format expected by the service
+      // Convert work items to the format needed for creation
       const convertedWorkItems = convertToServiceFormat(workItems);
       
       // Estimate total operations (1 per work item including children)
@@ -203,31 +328,100 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       
       const totalItems = countItems(convertedWorkItems);
       let completedItems = 0;
+      const createdResults: WorkItemCreationResult[] = [];
       
-      // Create mock progress updates (actual progress tracking would need service changes)
-      const progressInterval = setInterval(() => {
+      // Helper function to create a work item and its children
+      const createWorkItemHierarchy = async (item: any): Promise<WorkItemCreationResult> => {
+        // Add delay before creating each work item
+        await delay(500);
+        console.log(`Creating work item: ${item.type} - ${item.title}`);
+        
+        // Create main fields object with safe defaults
+        const fields: Record<string, any> = {
+          'System.Title': item.title,
+          'System.Description': item.description || 'No description provided',
+          'Microsoft.VSTS.Common.Priority': 2 // Default priority
+        };
+        
+        // Add acceptance criteria if present, or use default
+        if (item.acceptanceCriteria) {
+          // Handle array of acceptance criteria
+          const criteriaValue = Array.isArray(item.acceptanceCriteria) 
+            ? item.acceptanceCriteria.join("\n") 
+            : item.acceptanceCriteria;
+          
+          fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = criteriaValue;
+        }
+        
+        // Add any additional fields
+        if (item.additionalFields) {
+          for (const [key, value] of Object.entries(item.additionalFields)) {
+            // Skip empty values
+            if (value === null || value === undefined || value === '') {
+              continue;
+            }
+            
+            // Handle numeric fields with parsing
+            if (key === 'Microsoft.VSTS.Scheduling.StoryPoints' || 
+                key === 'Microsoft.VSTS.Scheduling.Effort' ||
+                key === 'Microsoft.VSTS.Scheduling.RemainingWork' ||
+                key === 'Microsoft.VSTS.Scheduling.OriginalEstimate') {
+              fields[key] = parseFloat(value as string) || 0;
+            } else if (key === 'Microsoft.VSTS.Common.Priority') {
+              fields[key] = parseInt(value as string) || 2;
+            } else {
+              fields[key] = value;
+            }
+          }
+        }
+        
+        // Create the work item using direct API call
+        const createdItem = await createWorkItem(item.type, fields, projectName);
+        
+        // Update progress
         completedItems++;
-        const progress = Math.min(Math.round((completedItems / totalItems) * 90), 90);
+        const progress = Math.min(Math.round((completedItems / totalItems) * 100), 100);
         setCreationProgress(progress);
         
-        if (completedItems >= totalItems) {
-          clearInterval(progressInterval);
+        // Create children sequentially if they exist
+        const childResults: WorkItemCreationResult[] = [];
+        
+        if (item.children && item.children.length > 0) {
+          // Process children one at a time in sequential order
+          for (const child of item.children) {
+            // Create child work item (with its own children recursively)
+            const childResult = await createWorkItemHierarchy(child);
+            childResults.push(childResult);
+            
+            // Create parent-child relationship
+            await createParentChildLink(childResult.id, createdItem.id, projectName);
+            
+            // Small delay after linking
+            await delay(100);
+          }
         }
-      }, 800);
+        
+        // Format the result
+        return {
+          id: createdItem.id,
+          title: item.title,
+          type: item.type,
+          url: createdItem._links?.web?.href || '',
+          children: childResults.length > 0 ? childResults : undefined
+        };
+      };
       
-      // Call the service to create work items
-      const results = await WorkItemService.createWorkItems(
-        convertedWorkItems,
-        projectName,
-        teamContext
-      );
+      // Process each top-level work item one after another
+      for (const item of convertedWorkItems) {
+        const result = await createWorkItemHierarchy(item);
+        createdResults.push(result);
+      }
       
-      // Clear the progress interval and set to 100%
-      clearInterval(progressInterval);
+      // Set to 100% when complete
       setCreationProgress(100);
       
       // Store the results
-      setCreatedWorkItems(results);
+      setCreatedWorkItems(createdResults);
       
       // Call the original onSubmit callback
       onSubmit(workItems);
@@ -235,7 +429,7 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       // Show success message
       setNotification({
         open: true,
-        message: `Successfully created ${results.length} work items`,
+        message: `Successfully created ${createdResults.length} work items`,
         severity: 'success'
       });
       
@@ -503,4 +697,4 @@ export const WorkItemForm: React.FC<WorkItemFormProps> = (props) => {
       <WorkItemFormInner {...props} />
     </WorkItemProvider>
   );
-}; 
+};

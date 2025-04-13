@@ -118,6 +118,8 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
         return theme.palette.mode === 'light' ? '#CCE0F4' : '#1E74BD';
       case 'User Story':
         return theme.palette.mode === 'light' ? '#D8EBDE' : '#399F4F';
+      case 'Product Backlog Item':
+        return theme.palette.mode === 'light' ? '#E0F2DB' : '#3F8945'; // Slightly different green shade for PBI
       case 'Task':
         return theme.palette.mode === 'light' ? '#F8E2B9' : '#CE8511';
       case 'Bug':
@@ -127,14 +129,20 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
     }
   };
   
-  // Check if this is a User Story to always show acceptance criteria
-  const isUserStory = item.type.toLowerCase().includes('user story') || 
-                     item.type.toLowerCase().includes('story') ||
-                     item.type.toLowerCase().includes('product backlog item') ||
-                     item.type.toLowerCase() === 'pbi';
+  // Precisely identify work item type using exact match rather than substring
+  const workItemType = item.type.toLowerCase();
+  
+  // Check if this is a User Story
+  const isUserStory = workItemType === 'user story';
+  
+  // Check if this is a Product Backlog Item 
+  const isProductBacklogItem = workItemType === 'product backlog item' || workItemType === 'pbi';
+  
+  // Combined check for items that should show acceptance criteria
+  const shouldShowAcceptanceByType = isUserStory || isProductBacklogItem;
                      
   // Determine if we should show acceptance criteria section - always show it if it exists in the data
-  const shouldShowAcceptanceCriteria = isUserStory || 
+  const shouldShowAcceptanceCriteria = shouldShowAcceptanceByType || 
                                      supportsAcceptanceCriteria || 
                                      (item.acceptanceCriteria && item.acceptanceCriteria.trim().length > 0) ||
                                      (item.additionalFields && item.additionalFields['Acceptance Criteria']);
@@ -240,13 +248,13 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
             <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1, overflow: 'hidden' }}>
               <Typography sx={{ 
                 fontWeight: 600,
-                color: theme.palette.mode === 'light' ? theme.palette.grey[800] : theme.palette.grey[100],
+                fontSize: '0.8rem',
                 mr: 1,
-                fontSize: '0.875rem',
-                backgroundColor: theme.palette.mode === 'light' ? 'rgba(0, 0, 0, 0.08)' : 'rgba(255, 255, 255, 0.15)',
-                padding: '3px 8px',
+                px: 1,
+                py: 0.5,
                 borderRadius: '4px',
-                display: 'inline-block'
+                bgcolor: 'rgba(0, 0, 0, 0.04)',
+                whiteSpace: 'nowrap'
               }}>
                 {item.type}
               </Typography>
@@ -455,8 +463,8 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
                   maxRows={6}
                   variant="outlined"
                   size="small"
-                  placeholder={isUserStory ? 
-                    "Define acceptance criteria for this user story..." : 
+                  placeholder={isUserStory || isProductBacklogItem ? 
+                    `Define acceptance criteria for this ${item.type}...` : 
                     T.acceptanceCriteria
                   }
                   value={
@@ -482,7 +490,7 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
                 
                 {!item.acceptanceCriteria && 
                  !(item.additionalFields && item.additionalFields['Acceptance Criteria']) && 
-                 isUserStory && (
+                 (isUserStory || isProductBacklogItem) && (
                   <Button
                     size="small"
                     variant="outlined"

@@ -1,10 +1,10 @@
 import * as React from 'react';
 import {
-    EditItemPath,
-    FieldLoadingState,
-    NotificationState,
-    RefinementModalState,
-    WorkItem
+  EditItemPath,
+  FieldLoadingState,
+  NotificationState,
+  RefinementModalState,
+  WorkItem
 } from '../types/WorkItemTypes';
 
 interface WorkItemContextValue {
@@ -122,7 +122,7 @@ export const WorkItemProvider: React.FC<WorkItemProviderProps> = ({
     path: number[]
   ): WorkItem[] => {
     const newItem: WorkItem = {
-      type: '',  // This will be set by the component
+      type: 'Product Backlog Item',  // Default to Product Backlog Item instead of empty string
       title: '',
       description: ''
     };
