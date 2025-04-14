@@ -6,33 +6,51 @@ interface HighLevelPlanProps {
   content: string;
   currentLanguage: Language;
   onUsePlan: () => void;
+  planType?: 'regular' | 'test';
 }
 
 const translations = {
   en: {
     highLevelPlan: 'High Level Plan',
-    usePlan: 'Use This Plan'
+    highLevelTestPlan: 'High Level Test Plan',
+    usePlan: 'Use This Plan',
+    useTestPlan: 'Use This Test Plan'
   },
   tr: {
     highLevelPlan: 'Üst Düzey Plan',
-    usePlan: 'Bu Planı Kullan'
+    highLevelTestPlan: 'Üst Düzey Test Planı',
+    usePlan: 'Bu Planı Kullan',
+    useTestPlan: 'Bu Test Planını Kullan'
   }
 } as const;
 
 export const HighLevelPlan: React.FC<HighLevelPlanProps> = ({
   content,
   currentLanguage,
-  onUsePlan
+  onUsePlan,
+  planType = 'regular'
 }) => {
   const T = translations[currentLanguage];
-  const planContent = content.replace('##HIGHLEVELPLAN##', '').trim();
+  
+  // Process content based on plan type
+  const planContent = content
+    .replace('##HIGHLEVELPLAN##', '')
+    .replace('##HIGHLEVELTESTPLAN##', '')
+    .trim();
+
+  // Determine label and button text based on plan type
+  const chipLabel = planType === 'test' ? T.highLevelTestPlan : T.highLevelPlan;
+  const buttonText = planType === 'test' ? T.useTestPlan : T.usePlan;
+  
+  // Use different color for test plan
+  const chipColor = planType === 'test' ? "secondary" : "primary";
 
   return (
     <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Chip 
-          label={T.highLevelPlan}
-          color="primary"
+          label={chipLabel}
+          color={chipColor}
           size="small"
         />
       </Box>
@@ -54,11 +72,11 @@ export const HighLevelPlan: React.FC<HighLevelPlanProps> = ({
       </Typography>
       <Button
         variant="contained"
-        color="primary"
+        color={chipColor}
         size="small"
         onClick={onUsePlan}
       >
-        {T.usePlan}
+        {buttonText}
       </Button>
     </Box>
   );

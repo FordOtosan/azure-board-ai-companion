@@ -1,7 +1,7 @@
 import { ContentCopy, Launch, PlaylistAddCheck } from '@mui/icons-material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'; // Import icon
 import ReplayIcon from '@mui/icons-material/Replay';
-import { Box, Button, IconButton, Tooltip } from '@mui/material'; // Add Button component
+import { Box, Button, IconButton, Tooltip } from '@mui/material'; // Add Typography component
 import * as React from 'react';
 import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
 
@@ -26,10 +26,12 @@ interface ChatMessagesProps {
   currentLanguage: Language; // Add language prop
   translations: typeof translations; // Add translations prop
   workItemSysPrompt: string; // Add system prompt prop
+  workItemsCreated?: boolean; // New prop to indicate if work items have been created
   onRetry?: (message: Message) => void;
   onCreateWorkItems?: (message: Message) => void;
   onUsePlan?: (message: Message) => void;
   onContinueWithTestPlan?: (message: Message) => void; // Add new prop for test plan
+  onShowWorkItems?: () => void; // Add new prop to show work items modal
 }
 
 // Add translations for JSON plan
@@ -52,7 +54,7 @@ const componentTranslations = {
   }
 } as const;
 
-export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLanguage, translations, workItemSysPrompt, onRetry, onCreateWorkItems, onUsePlan, onContinueWithTestPlan }) => {
+export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLanguage, translations, workItemSysPrompt, workItemsCreated = false, onRetry, onCreateWorkItems, onUsePlan, onContinueWithTestPlan, onShowWorkItems }) => {
   // Scroll to bottom ref
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   // State for copied message
@@ -62,6 +64,9 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
 
   // Translation shorthand
   const T = componentTranslations[currentLanguage];
+
+  // State to track if work items have been created
+  const [localWorkItemsCreated, setLocalWorkItemsCreated] = React.useState(workItemsCreated);
 
   // Scroll to bottom when messages change
   React.useEffect(() => {
@@ -76,6 +81,27 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
 
     return () => clearInterval(interval);
   }, []);
+
+  // Listen for work items created event
+  React.useEffect(() => {
+    const handleWorkItemsCreated = () => {
+      console.log("[ChatMessages] Detected work items created event");
+      setLocalWorkItemsCreated(true);
+    };
+    
+    // Add event listener
+    document.addEventListener('workItemsCreated', handleWorkItemsCreated);
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('workItemsCreated', handleWorkItemsCreated);
+    };
+  }, []);
+  
+  // Update local state if prop changes
+  React.useEffect(() => {
+    setLocalWorkItemsCreated(workItemsCreated);
+  }, [workItemsCreated]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -113,6 +139,10 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
 
   const isHighLevelPlan = (content: string): boolean => {
     return content.startsWith('##HIGHLEVELPLAN##');
+  };
+  
+  const isHighLevelTestPlan = (content: string): boolean => {
+    return content.startsWith('##HIGHLEVELTESTPLAN##');
   };
 
   const isDocumentPlan = (content: string): boolean => {
@@ -161,6 +191,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
             color="primary"
             startIcon={button.icon === 'open' ? <Launch /> : button.icon === 'test' ? <PlaylistAddCheck /> : null}
             onClick={() => {
+              console.log(`[ChatMessages] Navigation button clicked: ${button.action || button.url}`);
               if (button.url) {
                 window.open(button.url, '_blank');
               } else if (button.action === 'createTestPlan') {
@@ -170,6 +201,13 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                   onContinueWithTestPlan(jsonPlanMessage);
                 } else {
                   console.log('Create test plan functionality will be implemented later');
+                }
+              } else if (button.action === 'showWorkItems') {
+                // Open the Work Items Results modal
+                console.log('[ChatMessages] Show Work Items button clicked');
+                // Fire event to parent component
+                if (onShowWorkItems) {
+                  onShowWorkItems();
                 }
               }
             }}
@@ -218,6 +256,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
            // Determine if this message is streaming
            const isStreaming = msg.isStreaming === true;
            const hasHighLevelPlan = isHighLevelPlan(messageContent);
+           const hasHighLevelTestPlan = isHighLevelTestPlan(messageContent);
            const hasDocumentPlan = isDocumentPlan(messageContent);
            const hasJsonPlan = isJsonPlan(messageContent);
            
@@ -237,13 +276,16 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                  width: 'fit-content',
                  maxWidth: '80%'
                }}>
-                 {hasHighLevelPlan || hasDocumentPlan ? (
+                 {hasHighLevelPlan || hasDocumentPlan || hasHighLevelTestPlan ? (
                    <HighLevelPlan
-                     content={messageContent.replace('##DOCUMENTPLAN##', '##HIGHLEVELPLAN##')}
+                     content={messageContent
+                       .replace('##DOCUMENTPLAN##', '##HIGHLEVELPLAN##')}
                      currentLanguage={currentLanguage}
                      onUsePlan={() => onUsePlan?.(msg)}
+                     planType={hasHighLevelTestPlan ? 'test' : 'regular'}
                    />
-                 ) : hasJsonPlan && !isStreaming ? (
+                 ) : hasJsonPlan && !isStreaming && localWorkItemsCreated ? (
+                   // Only show these buttons if hasJsonPlan AND workItemsCreated is true
                    // Display a button instead of the JSON content - only for non-streaming JSON plans
                    <Box sx={{ 
                      p: 2, 
@@ -283,12 +325,37 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                          variant="outlined"
                          color="primary"
                          startIcon={<PlaylistAddCheck />}
-                         onClick={() => onContinueWithTestPlan ? onContinueWithTestPlan(msg) : console.log('Continue with test plan - to be implemented')}
+                         onClick={() => {
+                           console.log('[ChatMessages] Continue with Test Plan button clicked');
+                           onContinueWithTestPlan ? onContinueWithTestPlan(msg) : console.log('Continue with test plan - to be implemented');
+                         }}
                          sx={{ width: '100%' }}
                        >
                          {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
                        </Button>
                      </Box>
+                   </Box>
+                 ) : hasJsonPlan && !isStreaming ? (
+                   // Show the JSON plan but with a "use plan" button for creating work items when items haven't been created yet
+                   <Box sx={{ 
+                     p: 2, 
+                     backgroundColor: 'background.paper', 
+                     borderRadius: 2,
+                     border: '1px solid',
+                     borderColor: 'divider',
+                     display: 'flex',
+                     flexDirection: 'column',
+                     alignItems: 'center',
+                     gap: 2
+                   }}>
+                     <Button
+                       variant="contained"
+                       color="primary"
+                       onClick={() => onUsePlan?.(msg)}
+                       sx={{ width: '100%' }}
+                     >
+                       {currentLanguage === 'en' ? 'Show Work Items Form' : 'İş Öğeleri Formunu Görüntüle'}
+                     </Button>
                    </Box>
                  ) : msg.content === '' && msg.navigationButtons ? (
                    // Render navigation buttons for empty content messages with navigationButtons

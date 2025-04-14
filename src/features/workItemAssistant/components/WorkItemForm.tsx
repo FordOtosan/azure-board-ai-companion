@@ -493,6 +493,17 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         severity: 'success'
       });
       
+      // Log to console to say work items created
+      console.log("[WorkItemForm] Work items created:", createdResults);
+      
+      // Emit custom event to notify other parts of the application
+      const workItemsCreatedEvent = new CustomEvent('workItemsCreated', {
+        detail: {
+          workItems: createdResults
+        }
+      });
+      document.dispatchEvent(workItemsCreatedEvent);
+
       // Close all dialogs
       // setShowCreationDialog(false);
       

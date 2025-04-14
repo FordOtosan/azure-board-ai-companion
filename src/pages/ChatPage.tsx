@@ -130,10 +130,34 @@ const ChatPage: React.FC = () => {
   // Add new state for team work item mapping
   const [teamWorkItemMapping, setTeamWorkItemMapping] = React.useState<TeamWorkItemConfig | null>(null);
 
+  // Add new state to track if work items were successfully created
+  const [workItemsCreated, setWorkItemsCreated] = React.useState(false);
+
   // Add an effect to log messages changes
   React.useEffect(() => {
     console.log("Messages state updated. Count:", messages.length);
   }, [messages]);
+  
+  // Add event listener for work items created event
+  React.useEffect(() => {
+    const handleWorkItemsCreated = (event: Event) => {
+      console.log("[ChatPage] Detected workItemsCreated event");
+      setWorkItemsCreated(true);
+      
+      // Optionally store the created work items data
+      if ((event as CustomEvent).detail?.workItems) {
+        setCreationResults((event as CustomEvent).detail.workItems);
+      }
+    };
+    
+    // Add event listener
+    document.addEventListener('workItemsCreated', handleWorkItemsCreated);
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('workItemsCreated', handleWorkItemsCreated);
+    };
+  }, []);
 
   React.useEffect(() => {
     // Initialize SDK, get Org/Project info, fetch Teams, and LLM Settings
@@ -827,6 +851,9 @@ const ChatPage: React.FC = () => {
     // Force clear all messages first
     setMessages([]);
     
+    // Reset work items created state
+    setWorkItemsCreated(false);
+    
     // Then immediately re-add any system context messages (team selection)
     const teamContextMessage = messages.find(m => 
       m.role === 'system' && String(m.id).startsWith('team-select-')
@@ -938,39 +965,50 @@ const ChatPage: React.FC = () => {
     abortControllerRef.current = new AbortController();
     
     console.log('[ChatPage] Generating test plan from JSON plan');
-    
+
     // Create a prompt for test plan generation
     const testPlanPrompt = `
-# Generate Test Plan from Azure DevOps Work Items
+Your ONLY response must be a structured plan starting with ##HIGHLEVELTESTPLAN## followed by your plan.
 
-## Input Work Items JSON Plan:
+STRICT OUTPUT FORMAT:
+1. Start with ##HIGHLEVELTESTPLAN## on the first line
+2. Each line must be EXACTLY in format "[Type]: [Title]" where Type is one of: ${
+      teamWorkItemMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ') || 
+      teamMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ') || 
+      'Test Plan, Test Suite, Test Case'
+    }
+3. Use 2 spaces for each level of indentation
+4. NO descriptions, notes, explanations, or any other text
+5. NO markdown, bullets, asterisks, or any formatting
+6. NO empty lines between items
+7. NO prefixes or suffixes to titles (no numbers, dashes, etc.)
+8. KEEP ALL TITLES CONCISE - MAXIMUM 10 WORDS PER TITLE
+
+Example format:
+##HIGHLEVELTESTPLAN##
+Test Plan: Customer Management System Test Plan
+  Test Suite: User Registration and Authentication Tests
+    Test Case: Verify Account Registration with Valid Data
+    Test Case: Validate Form Input Requirements
+    Test Case: Test Registration API Response Codes
+    Test Case: Verify Login with Valid Credentials
+    Test Case: Test Login Error Handling
+  Test Suite: Customer Profile Management Tests
+    Test Case: Verify Profile Information Updates
+    Test Case: Test Profile Picture Upload Functionality
+
+Based on the JSON plan:
 ${messageContent}
 
-## Task:
-Create a comprehensive test plan for the work items described in the JSON plan above.
+## Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}`;
 
-## Test Plan Requirements:
-1. Organize tests hierarchically to match the work item structure
-2. For each user story or feature, create appropriate test cases
-3. Include both positive and negative test scenarios
-4. Add detailed test steps with expected results for each test case
-5. Include test cases for edge cases and error conditions
-6. Consider both functional and non-functional testing requirements
-7. Specify test prerequisites and environment requirements where needed
-
-## Test Plan Output Format:
-Provide a detailed test plan document in markdown format, including:
-
-1. Introduction and overview
-2. Test scope and objectives
-3. Test environment requirements
-4. Test scenarios organized by work item/feature
-5. Detailed test cases with steps and expected results
-6. Test coverage analysis
-
-## Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}
-
-Please provide a comprehensive test plan that ensures quality verification of all requirements and features in the work items.`;
+    // First remove any existing navigation button messages with the same action
+    setMessages(prev => 
+      prev.filter(msg => 
+        !(msg.navigationButtons && 
+          msg.navigationButtons.some(btn => btn.action === 'continueWithTestPlan'))
+      )
+    );
 
     // Create new messages
     const userMessageId = Date.now();
@@ -1028,24 +1066,6 @@ Please provide a comprehensive test plan that ensures quality verification of al
       console.error('Error generating test plan:', error);
       handleStreamError(error as Error);
       setCanStopGeneration(false);
-    }
-  };
-
-  // Update the renderNavigationButtons method in the component to use the new handler
-  const updateNavigationButtonHandler = (button: { action?: string }) => {
-    if (button.action === 'createTestPlan') {
-      // Get the last JSON plan message
-      const jsonPlanMessage = [...messages].reverse().find(msg => isJsonPlan(msg.content || ''));
-      if (jsonPlanMessage) {
-        handleContinueWithTestPlan(jsonPlanMessage);
-      } else {
-        showNotification(
-          currentLanguage === 'en' 
-            ? 'No JSON plan found to create test plan' 
-            : 'Test planı oluşturmak için JSON planı bulunamadı',
-          'warning'
-        );
-      }
     }
   };
 
@@ -1158,8 +1178,8 @@ Please provide a comprehensive test plan that ensures quality verification of al
               mx: 'auto'   // Center the container
           }}
       >
-          {/* Global loading overlay for JSON plan generation */}
-          {isLoadingResponse && !streamingMessageId && (
+          {/* Global loading overlay for JSON plan generation - hide when form modal is open */}
+          {isLoadingResponse && !streamingMessageId && !isWorkItemFormOpen && (
             <Fade in={true}>
               <Box
                 sx={{
@@ -1355,10 +1375,17 @@ Please provide a comprehensive test plan that ensures quality verification of al
                   currentLanguage={currentLanguage}
                   translations={translations}
                   workItemSysPrompt={workItemSysPrompt}
+                  workItemsCreated={workItemsCreated}
                   onContinueWithTestPlan={handleContinueWithTestPlan}
+                  onShowWorkItems={() => {
+                    console.log('[ChatPage] Show Work Items button clicked, reopening modal');
+                    setIsWorkItemResultsOpen(true);
+                  }}
                   onUsePlan={(msg) => {
                     // Get the message content
                     const messageContent = msg.content || '';
+                    
+                    console.log('[ChatPage] Use Plan button clicked');
                     
                     // Check if this is already a JSON plan
                     const isJsonPlan = (() => {
@@ -1381,6 +1408,19 @@ Please provide a comprehensive test plan that ensures quality verification of al
                         return false;
                       }
                     })();
+                    
+                    // Before opening form, make sure no navigation buttons exist
+                    // Remove any existing navigation buttons related to work items or test plans
+                    setMessages(prev => 
+                      prev.filter(msg => 
+                        !(msg.navigationButtons && 
+                          msg.navigationButtons.some(btn => 
+                            btn.action === 'showWorkItems' || 
+                            btn.action === 'continueWithTestPlan'
+                          )
+                        )
+                      )
+                    );
                     
                     if (isJsonPlan) {
                       // If it's already a JSON plan, directly open the form with that content
@@ -1847,18 +1887,206 @@ Please provide the complete JSON structure containing all work items from the hi
                           content: response
                         };
                         
-                        // Add the response message to the chat
+                        // Add the response message to the chat - no navigation buttons at this point
                         setMessages(prev => [...prev, jsonResponseMessage]);
                         
-                        // Store JSON plan for form
-                        setJsonPlan(response);
+                        // Extract and clean JSON from the response using our utility function
+                        try {
+                          const cleanedJsonPlan = await extractAndValidateJson(
+                            response,
+                            currentLlm!,
+                            (message, severity) => showNotification(
+                              currentLanguage === 'en' ? message : translateNotification(message, severity),
+                              severity
+                            )
+                          );
+                          
+                          // Store the validated JSON plan for form
+                          setJsonPlan(cleanedJsonPlan);
+                          
+                        } catch (error) {
+                          console.error(`[ChatPage] JSON extraction failed: ${error}`);
+                          showNotification(
+                            currentLanguage === 'en' 
+                              ? `Error parsing JSON plan: ${error}. Please try again.`
+                              : `JSON planı ayrıştırma hatası: ${error}. Lütfen tekrar deneyin.`,
+                            'error'
+                          );
+                          
+                          // Reset loading state without opening form
+                          setIsLoadingResponse(false);
+                          setCanStopGeneration(false);
+                          return;
+                        }
                         
-                        // Open the work item form
+                        // Helper function to translate notification messages
+                        function translateNotification(message: string, severity: 'info' | 'success' | 'warning' | 'error'): string {
+                          if (message.includes('Attempting to fix JSON format')) {
+                            return message.replace('Attempting to fix JSON format', 'JSON formatını düzeltme girişimi');
+                          } else if (message.includes('JSON fixed successfully')) {
+                            return message.replace('JSON fixed successfully', 'JSON başarıyla düzeltildi')
+                              .replace('attempt', 'deneme');
+                          }
+                          return message;
+                        }
+                        
+                        /**
+                         * Utility function to extract and validate JSON from LLM responses
+                         * @param response The raw LLM response text
+                         * @param llmConfig The LLM configuration for potential fix attempts
+                         * @param notifyUser Optional callback to show notifications to the user
+                         * @returns Cleaned and validated JSON string
+                         */
+                        async function extractAndValidateJson(
+                          response: string,
+                          llmConfig: LlmConfig,
+                          notifyUser?: (message: string, severity: 'info' | 'success' | 'warning' | 'error') => void
+                        ): Promise<string> {
+                          let cleanedJson = response;
+                          const MAX_ATTEMPTS = 3;
+                          let attempts = 0;
+                          
+                          // First attempt: Extract from code blocks
+                          try {
+                            const codeBlockMatch = response.match(/```(?:json)?\s*\n([\s\S]*?)\n```/);
+                            if (codeBlockMatch && codeBlockMatch[1]) {
+                              cleanedJson = codeBlockMatch[1].trim();
+                              console.log('[ChatPage] Extracted JSON from code block');
+                              
+                              // Validate
+                              JSON.parse(cleanedJson);
+                              console.log('[ChatPage] JSON validated successfully');
+                              return cleanedJson;
+                            }
+                            
+                            // If not in code block, try parsing directly
+                            JSON.parse(cleanedJson);
+                            return cleanedJson;
+                            
+                          } catch (jsonError) {
+                            console.error(`[ChatPage] Initial JSON parsing failed: ${jsonError}`);
+                            
+                            // Second attempt: Extract JSON object with regex
+                            try {
+                              const jsonObjectMatch = response.match(/(\{[\s\S]*\})/);
+                              if (jsonObjectMatch && jsonObjectMatch[1]) {
+                                cleanedJson = jsonObjectMatch[1].trim();
+                                
+                                // Validate
+                                JSON.parse(cleanedJson);
+                                console.log('[ChatPage] Fixed JSON by extracting object');
+                                return cleanedJson;
+                              }
+                            } catch (e) {
+                              console.error('[ChatPage] Regex extraction failed:', e);
+                            }
+                            
+                            // Try additional repair methods
+                            const repairMethods = [
+                              // Method 1: Try to find anything that looks like a JSON object with workItems
+                              async () => {
+                                attempts++;
+                                if (notifyUser) {
+                                  notifyUser(`Attempting to fix JSON format (${attempts}/${MAX_ATTEMPTS})...`, 'info');
+                                }
+                                
+                                const regex = /\{\s*"workItems"\s*:\s*\[[\s\S]*?\]\s*\}/;
+                                const match = response.match(regex);
+                                if (match && match[0]) {
+                                  console.log(`[ChatPage] Attempt ${attempts}: Found potential JSON using regex pattern`);
+                                  const result = match[0].trim();
+                                  JSON.parse(result); // Validate
+                                  return result;
+                                }
+                                return null;
+                              },
+                              
+                              // Method 2: Fix common JSON syntax issues
+                              async () => {
+                                attempts++;
+                                if (notifyUser) {
+                                  notifyUser(`Attempting to fix JSON format (${attempts}/${MAX_ATTEMPTS})...`, 'info');
+                                }
+                                
+                                console.log(`[ChatPage] Attempt ${attempts}: Trying to fix common JSON syntax issues`);
+                                
+                                let fixedJson = response.replace(/```json|```/g, '').trim();
+                                // Fix trailing commas
+                                fixedJson = fixedJson.replace(/,(\s*[}\]])/g, '$1');
+                                // Fix missing quotes around property names
+                                fixedJson = fixedJson.replace(/([{,]\s*)([a-zA-Z0-9_]+)(\s*:)/g, '$1"$2"$3');
+                                
+                                // Validate
+                                JSON.parse(fixedJson);
+                                return fixedJson;
+                              },
+                              
+                              // Method 3: Ask LLM to fix the JSON
+                              async () => {
+                                attempts++;
+                                if (notifyUser) {
+                                  notifyUser(`Attempting to fix JSON format (${attempts}/${MAX_ATTEMPTS})...`, 'info');
+                                }
+                                
+                                console.log(`[ChatPage] Attempt ${attempts}: Asking LLM to fix the JSON`);
+                                
+                                const fixPrompt = `
+Fix this invalid JSON and return ONLY the fixed JSON with no explanations or comments:
+
+${response}
+
+Invalid JSON error: ${jsonError}
+
+Return ONLY the fixed JSON with no explanations, comments or backticks.`;
+
+                                const fixedJson = await LlmApiService.sendPromptToLlm(
+                                  llmConfig,
+                                  fixPrompt,
+                                  []
+                                );
+                                
+                                // Clean up and validate
+                                const result = fixedJson.replace(/```json|```/g, '').trim();
+                                JSON.parse(result);
+                                return result;
+                              }
+                            ];
+                            
+                            // Try each repair method
+                            for (const repair of repairMethods) {
+                              try {
+                                const result = await repair();
+                                if (result) {
+                                  if (notifyUser) {
+                                    notifyUser(`JSON fixed successfully (attempt ${attempts}/${MAX_ATTEMPTS})`, 'success');
+                                  }
+                                  return result;
+                                }
+                              } catch (e) {
+                                console.error(`[ChatPage] Repair method failed:`, e);
+                                // Continue to next method
+                              }
+                            }
+                            
+                            // If we get here, all repair methods failed
+                            throw new Error('Could not extract valid JSON after multiple attempts');
+                          }
+                        }
+                        
+                        // Open the work item form immediately - no navigation buttons should be added here
                         setIsWorkItemFormOpen(true);
                         
-                        // Reset loading state
+                        // Hide the loading overlay as the dialog is now open
                         setIsLoadingResponse(false);
                         setCanStopGeneration(false);
+                        
+                        // Show notification to user
+                        showNotification(
+                          currentLanguage === 'en' 
+                            ? 'Work item plan created successfully' 
+                            : 'İş öğesi planı başarıyla oluşturuldu',
+                          'success'
+                        );
                         
                       } catch (error) {
                         console.error('Error generating detailed JSON:', error);
@@ -1885,7 +2113,32 @@ Please provide the complete JSON structure containing all work items from the hi
           {/* Work Item Form Dialog */}
           <Dialog
             open={isWorkItemFormOpen}
-            onClose={() => setIsWorkItemFormOpen(false)}
+            onClose={() => {
+              // Close the modal
+              setIsWorkItemFormOpen(false);
+              
+              // Ensure all loading states are reset when modal is closed manually
+              setIsLoadingResponse(false);
+              setCanStopGeneration(false); 
+              setIsCreatingWorkItems(false);
+              
+              // Clear any streaming message state
+              if (streamingMessageIdRef.current) {
+                streamingMessageIdRef.current = null;
+                setStreamingMessageId(null);
+              }
+              
+              // Abort any ongoing request
+              if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+              }
+              
+              // If work items were not successfully created, don't show the button
+              if (!workItemsCreated) {
+                return;
+              }
+            }}
             maxWidth="lg"
             fullWidth
             PaperProps={{
@@ -1942,30 +2195,61 @@ Please provide the complete JSON structure containing all work items from the hi
                           : `${totalItems} iş öğesi başarıyla oluşturuldu.`
                       };
                       
-                      // Add success message to chat
-                      setMessages(prev => [...prev, successMessage]);
+                      // Find any existing JSON plan messages in the chat
+                      const jsonPlanMessages = messages.filter(
+                        m => m.content && isJsonPlan(m.content) && m.role === 'assistant'
+                      );
                       
-                      // Add a message with navigation buttons
-                      const navigationMessage: Message = {
-                        id: Date.now() + 1,
-                        role: 'system',
-                        content: '',
-                        navigationButtons: [
-                          {
-                            label: currentLanguage === 'en' ? 'Go to Work Items' : 'İş Öğelerine Git',
-                            url: `https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`,
-                            icon: 'open'
-                          },
-                          {
-                            label: currentLanguage === 'en' ? 'Create Test Plan' : 'Test Planı Oluştur',
-                            action: 'createTestPlan',
-                            icon: 'test'
-                          }
-                        ]
-                      };
+                      // Remove any existing navigation button messages
+                      const filteredMessages = messages.filter(msg => 
+                        !(msg.navigationButtons && 
+                          msg.navigationButtons.some(btn => btn.action === 'showWorkItems'))
+                      );
                       
-                      // Add navigation message to chat
-                      setMessages(prev => [...prev, navigationMessage]);
+                      // Remove JSON plan messages - they'll be recreated with workItemsCreated=true
+                      const messagesWithoutJsonPlans = filteredMessages.filter(msg => 
+                        !jsonPlanMessages.some(planMsg => planMsg.id === msg.id)
+                      );
+                      
+                      // Add success message to filtered messages
+                      const updatedMessages = [...messagesWithoutJsonPlans, successMessage];
+                      
+                      // First set workItemsCreated to true AFTER updating messages
+                      // This prevents old messages from being updated while still in view
+                      setMessages(updatedMessages);
+                      
+                      // Now set the created flag - this will affect all future renders
+                      setWorkItemsCreated(true);
+                      
+                      // After a short delay, reintroduce any JSON plan messages with new IDs
+                      // This forces React to treat them as new components with the updated workItemsCreated prop
+                      setTimeout(() => {
+                        if (jsonPlanMessages.length > 0) {
+                          const recreatedJsonPlans = jsonPlanMessages.map(msg => ({
+                            ...msg,
+                            id: Date.now() + Math.random(), // Force a new ID
+                          }));
+                          
+                          setMessages(prev => [...prev, ...recreatedJsonPlans]);
+                        }
+                        
+                        // Add a button message that will allow reopening the results modal
+                        const showItemsMessage: Message = {
+                          id: Date.now() + 2,
+                          role: 'system',
+                          content: '',
+                          navigationButtons: [
+                            {
+                              label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
+                              action: 'showWorkItems',
+                              icon: 'list' // Use a list icon for better visibility
+                            }
+                          ]
+                        };
+                        
+                        // Add button message to chat
+                        setMessages(prev => [...prev, showItemsMessage]);
+                      }, 100);
                       
                       // Show notification
                       showNotification(
@@ -1980,16 +2264,27 @@ Please provide the complete JSON structure containing all work items from the hi
                       
                       // Show results
                       setIsWorkItemResultsOpen(true);
+                      
+                      // Ensure all loading states are reset to re-enable UI interaction
+                      setIsLoadingResponse(false);
+                      setCanStopGeneration(false);
+                      setIsCreatingWorkItems(false);
                     } catch (error) {
+                      // Reset the work items created flag if there's an error
+                      setWorkItemsCreated(false);
+                      
                       console.error('Error creating work items:', error);
+                      
+                      // Get the error message correctly
+                      const errorMsg = error instanceof Error ? error.message : String(error || 'Unknown error');
                       
                       // Create error message
                       const errorMessage: Message = {
                         id: Date.now(),
                         role: 'system',
                         content: currentLanguage === 'en'
-                          ? `Error creating work items: ${(error as Error).message || 'Unknown error'}`
-                          : `İş öğelerini oluştururken hata: ${(error as Error).message || 'Bilinmeyen hata'}`
+                          ? `Error creating work items: ${errorMsg}`
+                          : `İş öğelerini oluştururken hata: ${errorMsg}`
                       };
                       
                       // Add error message to chat
@@ -1998,8 +2293,8 @@ Please provide the complete JSON structure containing all work items from the hi
                       // Show notification
                       showNotification(
                         currentLanguage === 'en' 
-                          ? `Error creating work items: ${(error as Error).message || 'Unknown error'}` 
-                          : `İş öğelerini oluştururken hata: ${(error as Error).message || 'Bilinmeyen hata'}`,
+                          ? `Error creating work items: ${errorMsg}` 
+                          : `İş öğelerini oluştururken hata: ${errorMsg}`,
                         'error'
                       );
                     } finally {
@@ -2015,7 +2310,17 @@ Please provide the complete JSON structure containing all work items from the hi
           {/* Work Item Creation Results Dialog */}
           <Dialog
             open={isWorkItemResultsOpen}
-            onClose={() => setIsWorkItemResultsOpen(false)}
+            onClose={() => {
+              // Close the modal
+              setIsWorkItemResultsOpen(false);
+              
+              // Ensure all loading states are reset when modal is closed manually
+              setIsLoadingResponse(false);
+              setCanStopGeneration(false);
+              setIsCreatingWorkItems(false);
+              
+              // Don't reset workItemsCreated here as we still want to allow reopening the results
+            }}
             maxWidth="md"
             fullWidth
             PaperProps={{
