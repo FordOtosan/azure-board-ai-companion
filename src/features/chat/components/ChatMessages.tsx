@@ -1,5 +1,4 @@
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import Description from '@mui/icons-material/Description'; // Add icon for JSON Plan
+import { ContentCopy, Launch, PlaylistAddCheck } from '@mui/icons-material';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'; // Import icon
 import ReplayIcon from '@mui/icons-material/Replay';
 import { Box, Button, IconButton, Tooltip } from '@mui/material'; // Add Button component
@@ -18,6 +17,7 @@ interface Message {
   tKey?: keyof typeof translations['en']; // Optional translation key
   tParams?: Record<string, any>; // Optional translation parameters
   isStreaming?: boolean; // Flag to indicate if the message is currently streaming
+  navigationButtons?: { label: string; url?: string; action?: string; icon?: string }[];
 }
 
 interface ChatMessagesProps {
@@ -138,6 +138,48 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
     }
   };
 
+  // Add new section to render navigation buttons
+  const renderNavigationButtons = (msg: Message) => {
+    if (!msg.navigationButtons || msg.navigationButtons.length === 0) {
+      return null;
+    }
+
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        gap: 2, 
+        justifyContent: 'center', 
+        mt: 2,
+        flexWrap: 'wrap'
+      }}>
+        {msg.navigationButtons.map((button, index) => (
+          <Button
+            key={index}
+            variant="contained"
+            color="primary"
+            startIcon={button.icon === 'open' ? <Launch /> : button.icon === 'test' ? <PlaylistAddCheck /> : null}
+            onClick={() => {
+              if (button.url) {
+                window.open(button.url, '_blank');
+              } else if (button.action === 'createTestPlan') {
+                // This will be implemented later
+                console.log('Create test plan functionality will be implemented later');
+              }
+            }}
+            sx={{ 
+              borderRadius: 2,
+              py: 1, 
+              px: 2,
+              fontWeight: 500
+            }}
+          >
+            {button.label}
+          </Button>
+        ))}
+      </Box>
+    );
+  };
+
   return (
     <Box sx={{ 
       flexGrow: 1, 
@@ -207,17 +249,30 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                      alignItems: 'center',
                      gap: 2
                    }}>
-                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                       <Description color="primary" />
+                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexDirection: 'column' }}>
                        <Button
                          variant="contained"
                          color="primary"
-                         onClick={() => onUsePlan?.(msg)}
+                         startIcon={<Launch />}
+                         onClick={() => console.log('View created items - to be implemented')}
+                         sx={{ mb: 1, width: '100%' }}
                        >
-                         {T.showWorkItems}
+                         {currentLanguage === 'en' ? 'Go to Created Items' : 'Oluşturulan Öğelere Git'}
+                       </Button>
+                       <Button
+                         variant="outlined"
+                         color="primary"
+                         startIcon={<PlaylistAddCheck />}
+                         onClick={() => console.log('Continue with test plan - to be implemented')}
+                         sx={{ width: '100%' }}
+                       >
+                         {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
                        </Button>
                      </Box>
                    </Box>
+                 ) : msg.content === '' && msg.navigationButtons ? (
+                   // Render navigation buttons for empty content messages with navigationButtons
+                   renderNavigationButtons(msg)
                  ) : (
                    <Box sx={{ position: 'relative', width: '100%' }}>
                      <MarkdownMessage
@@ -246,6 +301,9 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                    </Box>
                  )}
                  
+                 {/* Render navigation buttons after content if present */}
+                 {msg.content !== '' && msg.navigationButtons && renderNavigationButtons(msg)}
+                 
                  {/* Action buttons */}
                  {msg.role !== 'system' && (
                    <Box sx={{ 
@@ -270,7 +328,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                            }
                          }}
                        >
-                         <ContentCopyIcon fontSize="inherit" />
+                         <ContentCopy fontSize="inherit" />
                        </IconButton>
                      </Tooltip>
 

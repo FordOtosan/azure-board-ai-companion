@@ -1,13 +1,10 @@
-import { Add as AddIcon, Launch as LaunchIcon } from '@mui/icons-material';
+import { Add as AddIcon } from '@mui/icons-material';
 import {
   Alert,
   Box,
   Button,
   Card,
   CircularProgress,
-  Dialog,
-  DialogContent,
-  DialogTitle,
   LinearProgress,
   Snackbar,
   Typography,
@@ -62,6 +59,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
   const [createdWorkItems, setCreatedWorkItems] = React.useState<WorkItemCreationResult[]>([]);
   const [creationError, setCreationError] = React.useState<string | null>(null);
   const [showCreationDialog, setShowCreationDialog] = React.useState(false);
+  const [currentItemBeingCreated, setCurrentItemBeingCreated] = React.useState<string>('');
+  const [exactCompletedItems, setExactCompletedItems] = React.useState<number>(0);
   
   // Handle the "Refine Again" button click in the modal
   React.useEffect(() => {
@@ -306,7 +305,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
     setIsCreating(true);
     setCreationProgress(0);
     setCreationError(null);
-    setShowCreationDialog(true);
+    setCurrentItemBeingCreated('');
+    setExactCompletedItems(0);
     
     try {
       // Get organization and project info
@@ -333,8 +333,11 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       // Helper function to create a work item and its children
       const createWorkItemHierarchy = async (item: any): Promise<WorkItemCreationResult> => {
         // Add delay before creating each work item
-        await delay(500);
+        await delay(200);
         console.log(`Creating work item: ${item.type} - ${item.title}`);
+        
+        // Update the current item being created
+        setCurrentItemBeingCreated(`${item.type}: ${item.title}`);
         
         // Create main fields object with safe defaults
         const fields: Record<string, any> = {
@@ -378,8 +381,9 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         // Create the work item using direct API call
         const createdItem = await createWorkItem(item.type, fields, projectName);
         
-        // Update progress
+        // Update progress and completed items count
         completedItems++;
+        setExactCompletedItems(prev => prev + 1);
         const progress = Math.min(Math.round((completedItems / totalItems) * 100), 100);
         setCreationProgress(progress);
         
@@ -417,14 +421,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         createdResults.push(result);
       }
       
-      // Set to 100% when complete
-      setCreationProgress(100);
-      
-      // Store the results
-      setCreatedWorkItems(createdResults);
-      
-      // Call the original onSubmit callback
-      onSubmit(workItems);
+      // Set isCreating to false to show the completed UI
+      setIsCreating(false);
       
       // Show success message
       setNotification({
@@ -432,6 +430,17 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         message: `Successfully created ${createdResults.length} work items`,
         severity: 'success'
       });
+      
+      // Close all dialogs
+      // setShowCreationDialog(false);
+      
+      // Navigate to the top work item if available
+      if (createdResults.length > 0 && createdResults[0].url) {
+        window.open(createdResults[0].url, '_blank');
+      }
+      
+      // Close the form
+      onClose();
       
     } catch (error) {
       console.error('Error creating work items:', error);
@@ -441,8 +450,6 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         message: `Failed to create work items: ${error instanceof Error ? error.message : 'Unknown error'}`,
         severity: 'error'
       });
-    } finally {
-      setIsCreating(false);
     }
   };
 
@@ -495,7 +502,14 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
             {isCreating ? (
               <React.Fragment>
                 <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
-                {T.createWorkItems}
+                {`${exactCompletedItems} of ${(() => {
+                  const countItems = (items: any[]): number => {
+                    return items.reduce((count, item) => {
+                      return count + 1 + (item.children ? countItems(item.children) : 0);
+                    }, 0);
+                  };
+                  return countItems(workItems);
+                })()} - ${creationProgress}%`}
               </React.Fragment>
             ) : (
               T.createWorkItems
@@ -508,6 +522,20 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         <Alert severity="error" sx={{ m: 2 }}>
           {error}
         </Alert>
+      )}
+      
+      {/* Add a small progress indicator in the main form when creating */}
+      {isCreating && (
+        <Box sx={{ px: 2, py: 1, bgcolor: 'background.paper' }}>
+          <LinearProgress 
+            variant="determinate" 
+            value={creationProgress} 
+            sx={{ height: 4, borderRadius: 2 }} 
+          />
+          <Typography variant="caption" sx={{ display: 'block', mt: 0.5, textAlign: 'center' }}>
+            Currently creating: {currentItemBeingCreated}
+          </Typography>
+        </Box>
       )}
       
       <Box sx={{ 
@@ -589,58 +617,6 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
           {notification.message}
         </Alert>
       </Snackbar>
-
-      {/* Work Item Creation Dialog */}
-      <Dialog 
-        open={showCreationDialog} 
-        onClose={handleCloseCreationDialog}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>
-          {createdWorkItems.length > 0 
-            ? T.workItemsCreated 
-            : T.creatingWorkItems}
-        </DialogTitle>
-        <DialogContent>
-          {isCreating && (
-            <Box sx={{ width: '100%', mt: 2, mb: 4 }}>
-              <LinearProgress 
-                variant="determinate" 
-                value={creationProgress} 
-                sx={{ height: 10, borderRadius: 5 }} 
-              />
-              <Typography variant="body2" color="text.secondary" align="center" sx={{ mt: 1 }}>
-                {creationProgress}% {T.creationComplete}
-              </Typography>
-            </Box>
-          )}
-
-          {creationError && (
-            <Alert severity="error" sx={{ mt: 2, mb: 2 }}>
-              {creationError}
-            </Alert>
-          )}
-
-          {createdWorkItems.length > 0 && (
-            <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <Typography variant="body1" sx={{ mb: 2 }}>
-                {T.workItemsCreated}
-              </Typography>
-              
-              <Button
-                variant="contained"
-                color="primary"
-                startIcon={<LaunchIcon />}
-                onClick={() => navigateToWorkItem(createdWorkItems[0].url)}
-                sx={{ mt: 2 }}
-              >
-                {T.viewTopWorkItem}
-              </Button>
-            </Box>
-          )}
-        </DialogContent>
-      </Dialog>
     </Box>
   );
 };

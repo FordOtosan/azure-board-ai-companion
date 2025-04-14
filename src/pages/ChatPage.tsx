@@ -50,6 +50,12 @@ interface Message {
     tKey?: keyof typeof translations['en']; // Translation key (optional)
     tParams?: Record<string, any>; // Translation parameters (optional)
     isStreaming?: boolean; // Flag to indicate if the message is currently streaming
+    navigationButtons?: {
+      label: string;
+      url?: string;
+      action?: string;
+      icon?: string;
+    }[];
 }
 
 // Define possible actions after team selection
@@ -1762,6 +1768,28 @@ Please provide the complete JSON structure containing all work items from the hi
                       
                       // Add success message to chat
                       setMessages(prev => [...prev, successMessage]);
+                      
+                      // Add a message with navigation buttons
+                      const navigationMessage: Message = {
+                        id: Date.now() + 1,
+                        role: 'system',
+                        content: '',
+                        navigationButtons: [
+                          {
+                            label: currentLanguage === 'en' ? 'Go to Work Items' : 'İş Öğelerine Git',
+                            url: results[0]?.url || '',
+                            icon: 'open'
+                          },
+                          {
+                            label: currentLanguage === 'en' ? 'Create Test Plan' : 'Test Planı Oluştur',
+                            action: 'createTestPlan',
+                            icon: 'test'
+                          }
+                        ]
+                      };
+                      
+                      // Add navigation message to chat
+                      setMessages(prev => [...prev, navigationMessage]);
                       
                       // Show notification
                       showNotification(
