@@ -14,13 +14,13 @@ const translations = {
     highLevelPlan: 'High Level Plan',
     highLevelTestPlan: 'High Level Test Plan',
     usePlan: 'Use This Plan',
-    useTestPlan: 'Use This Test Plan'
+    useTestPlan: 'USE THIS TEST PLAN'
   },
   tr: {
     highLevelPlan: 'Üst Düzey Plan',
     highLevelTestPlan: 'Üst Düzey Test Planı',
     usePlan: 'Bu Planı Kullan',
-    useTestPlan: 'Bu Test Planını Kullan'
+    useTestPlan: 'BU TEST PLANINI KULLAN'
   }
 } as const;
 
@@ -46,7 +46,14 @@ export const HighLevelPlan: React.FC<HighLevelPlanProps> = ({
   const chipColor = planType === 'test' ? "secondary" : "primary";
 
   return (
-    <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+    <Box sx={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'flex-start', 
+      gap: 2,
+      width: '100%',
+      maxWidth: '800px'
+    }}>
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Chip 
           label={chipLabel}
@@ -73,8 +80,15 @@ export const HighLevelPlan: React.FC<HighLevelPlanProps> = ({
       <Button
         variant="contained"
         color={chipColor}
-        size="small"
+        size={planType === 'test' ? "medium" : "small"}
         onClick={onUsePlan}
+        sx={{ 
+          width: planType === 'test' ? '100%' : 'auto',
+          borderRadius: 1,
+          py: planType === 'test' ? 1.5 : 1,
+          fontWeight: planType === 'test' ? 'bold' : 'medium',
+          textTransform: planType === 'test' ? 'uppercase' : 'none'
+        }}
       >
         {buttonText}
       </Button>

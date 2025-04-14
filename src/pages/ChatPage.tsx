@@ -33,6 +33,7 @@ import { WorkItemForm } from '../features/chat/components/WorkItemForm';
 import '../features/chat/styles/chat.css';
 import { LlmConfig, LlmSettings, LlmSettingsService } from '../features/settings/services/LlmSettingsService'; // Import LLM Settings Service
 import { TeamWorkItemConfig, WorkItemSettingsService } from '../features/settings/services/WorkItemSettingsService';
+import { TestPlanForm } from '../features/testPlanAssistant';
 import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
 import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
@@ -133,6 +134,11 @@ const ChatPage: React.FC = () => {
   // Add new state to track if work items were successfully created
   const [workItemsCreated, setWorkItemsCreated] = React.useState(false);
 
+  // Add new state for test plan form
+  const [isTestPlanFormOpen, setIsTestPlanFormOpen] = React.useState(false);
+  const [testPlanContent, setTestPlanContent] = React.useState<string>('');
+  const [testPlansCreated, setTestPlansCreated] = React.useState(false);
+  
   // Add an effect to log messages changes
   React.useEffect(() => {
     console.log("Messages state updated. Count:", messages.length);
@@ -168,7 +174,21 @@ const ChatPage: React.FC = () => {
         setSelectedTeam(null); // Reset selection on load
         setTeams([]);
       try {
-        await AzureDevOpsSdkService.initialize(); 
+        console.log("Initializing Azure DevOps SDK...");
+        await AzureDevOpsSdkService.initialize();
+        console.log("SDK initialized successfully");
+        
+        // Initialize test listeners for CORS issues with auth
+        // This pre-authenticates the extension with Azure DevOps services
+        try {
+          console.log("Testing API access for authentication...");
+          const testClient = await AzureDevOpsSdkService.getWorkItemTrackingClient();
+          console.log("Work Item Tracking client initialized - authentication successful");
+        } catch (authError) {
+          console.error("Error initializing Work Item Tracking client:", authError);
+          setError(`Authentication failed: ${authError instanceof Error ? authError.message : 'Unknown error'}`);
+        }
+        
         const info = await getOrganizationAndProject();
         setOrgProjectInfo(info);
         setInitialized(true); // Mark base init done
@@ -299,6 +319,27 @@ const ChatPage: React.FC = () => {
 
     loadTeamMapping();
   }, [selectedTeam]);
+
+  // Listen for testPlanCreated event
+  React.useEffect(() => {
+    const handleTestPlanCreated = (event: Event) => {
+      console.log("[ChatPage] Detected testPlanCreated event");
+      setTestPlansCreated(true);
+      
+      // Optionally store the created test plan data
+      // if ((event as CustomEvent).detail?.testPlan) {
+      //   // Do something with test plan data if needed
+      // }
+    };
+    
+    // Add event listener
+    document.addEventListener('testPlanCreated', handleTestPlanCreated);
+    
+    // Cleanup
+    return () => {
+      document.removeEventListener('testPlanCreated', handleTestPlanCreated);
+    };
+  }, []);
 
   // --- Handlers ---
   const handleTeamSelect = (team: WebApiTeam) => {
@@ -957,9 +998,39 @@ const ChatPage: React.FC = () => {
     // Get the message content
     const messageContent = msg.content;
     
+    // Check if this is a high level test plan already
+    if (messageContent.includes('##HIGHLEVELTESTPLAN##')) {
+      // It's already a high level test plan, add it to chat and don't open modal yet
+      const userMessageId = Date.now();
+      const userMessage: Message = {
+        id: userMessageId,
+        role: 'user',
+        content: 'Show me a test plan for this'
+      };
+      
+      const testPlanMessageId = Date.now() + 1;
+      const testPlanMessage: Message = {
+        id: testPlanMessageId,
+        role: 'assistant',
+        content: messageContent,
+        navigationButtons: [
+          {
+            label: currentLanguage === 'en' ? 'USE THIS TEST PLAN' : 'BU TEST PLANINI KULLAN',
+            action: 'use_test_plan'
+          }
+        ]
+      };
+      
+      // Add both messages to the chat
+      setMessages(prev => [...prev, userMessage, testPlanMessage]);
+      return;
+    }
+    
+    // Otherwise, we need to generate a test plan without showing it in chat
     // Set loading state
     setIsLoadingResponse(true);
     setCanStopGeneration(true);
+    showNotification('Preparing test plan...', 'info');
     
     // Create new AbortController for this request
     abortControllerRef.current = new AbortController();
@@ -998,38 +1069,10 @@ ${messageContent}
 
 ## Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}`;
 
-    // First remove any existing navigation button messages with the same action
-    setMessages(prev => 
-      prev.filter(msg => 
-        !(msg.navigationButtons && 
-          msg.navigationButtons.some(btn => btn.action === 'continueWithTestPlan'))
-      )
-    );
-
-    // Create new messages
-    const userMessageId = Date.now();
-    const userMessage: Message = {
-      id: userMessageId,
-      role: 'user',
-      content: 'Generate a test plan for the work items'
-    };
-    
-    const testPlanMessageId = Date.now() + 1;
-    const testPlanMessage: Message = {
-      id: testPlanMessageId,
-      role: 'assistant',
-      content: '',
-      isStreaming: true
-    };
-    
-    // Add both messages to the chat
-    setMessages(prev => [...prev, userMessage, testPlanMessage]);
-    
-    // Set streaming state for the plan
-    setStreamingMessageId(testPlanMessageId);
-    streamingMessageIdRef.current = testPlanMessageId;
-    
     try {
+      // Debug log the test plan prompt for troubleshooting
+      console.log('[ChatPage] Test plan prompt:', testPlanPrompt);
+      
       // Add user message to LLM history
       const newUserMessage: ChatMessage = { 
         role: 'user', 
@@ -1037,31 +1080,60 @@ ${messageContent}
       };
       const updatedHistory = [...llmHistory, newUserMessage];
       
-      // Update the history state immediately to include this message
+      // Update the history state
       setLlmHistory(updatedHistory);
       
-      // Stream LLM response
-      LlmApiService.streamPromptToLlm(
-        currentLlm,
-        testPlanPrompt,
-        updateStreamingMessage,
-        (fullResponse) => {
-          handleStreamComplete(fullResponse);
+      // Use sendPromptToLlm which returns a Promise
+      LlmApiService.sendPromptToLlm(currentLlm, testPlanPrompt, updatedHistory)
+        .then((fullResponse: string) => {
           setCanStopGeneration(false);
+          setIsLoadingResponse(false);
+          
+          console.log('[ChatPage] Received test plan response:', fullResponse);
+          
           // Add assistant response to history
           setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
-        },
-        (error) => {
-          handleStreamError(error);
+          
+          // Check if it's a valid high level test plan
+          if (fullResponse.includes('##HIGHLEVELTESTPLAN##')) {
+            // Add the test plan to the chat instead of immediately opening the form
+            const userMessageId = Date.now();
+            const userMessage: Message = {
+              id: userMessageId,
+              role: 'user',
+              content: 'Show me a test plan for this'
+            };
+            
+            const testPlanMessageId = Date.now() + 1;
+            const testPlanMessage: Message = {
+              id: testPlanMessageId,
+              role: 'assistant',
+              content: fullResponse,
+              navigationButtons: [
+                {
+                  label: currentLanguage === 'en' ? 'USE THIS TEST PLAN' : 'BU TEST PLANINI KULLAN',
+                  action: 'use_test_plan'
+                }
+              ]
+            };
+            
+            // Add both messages to the chat
+            setMessages(prev => [...prev, userMessage, testPlanMessage]);
+          } else {
+            showNotification('Invalid test plan format received. Please try again.', 'error');
+          }
+        })
+        .catch((error: Error) => {
+          console.error('Error generating test plan:', error);
           setCanStopGeneration(false);
-        },
-        abortControllerRef.current,
-        updatedHistory
-      );
+          setIsLoadingResponse(false);
+          showNotification('Error generating test plan', 'error');
+        });
     } catch (error) {
       console.error('Error generating test plan:', error);
-      handleStreamError(error as Error);
       setCanStopGeneration(false);
+      setIsLoadingResponse(false);
+      showNotification('Error generating test plan', 'error');
     }
   };
 
@@ -1383,7 +1455,127 @@ ${messageContent}
                     
                     console.log('[ChatPage] Use Plan button clicked');
                     
-                    // Check if this is already a JSON plan
+                    // First check if this is a test plan
+                    if (messageContent.includes('##HIGHLEVELTESTPLAN##')) {
+                      console.log('[ChatPage] Detected test plan content');
+                      
+                      // If current LLM is not available, just show the form with raw content
+                      if (!currentLlm) {
+                        setTestPlanContent(messageContent);
+                        setIsTestPlanFormOpen(true);
+                        return;
+                      }
+                      
+                      // Otherwise, generate the JSON test plan structure for better parsing
+                      setIsLoadingResponse(true);
+                      setCanStopGeneration(true);
+                      
+                      // Create new AbortController for this request
+                      abortControllerRef.current = new AbortController();
+                      
+                      console.log('[ChatPage] Generating JSON test plan from high level test plan');
+                      
+                      // Create a prompt for structured JSON test plan generation
+                      const jsonTestPlanPrompt = `
+You are a test plan structuring assistant. Convert the following high-level test plan into a JSON structure.
+
+INPUT TEST PLAN:
+${messageContent}
+
+OUTPUT FORMAT:
+Your response must be ONLY a valid JSON object with this structure:
+{
+  "testPlan": {
+    "name": "string", // The name of the test plan
+    "testSuites": [
+      {
+        "name": "string", // The name of a test suite
+        "testCases": [
+          {
+            "name": "string", // The name of a test case
+            "description": "string", // A detailed description of what this test case verifies
+            "steps": [
+              {
+                "action": "string", // Specific action the tester should take
+                "expectedResult": "string" // The expected outcome of the action
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
+
+CRITICAL REQUIREMENTS:
+1. EVERY "testSuites" array MUST contain at least one test suite
+2. EVERY test suite MUST have a "testCases" array, even if empty
+3. EVERY test case MUST include at least 3-5 detailed steps with clear actions and expected results
+4. DO NOT omit the "testCases" property from any suite, even if empty use: "testCases": []
+5. DO NOT omit the "steps" property from any test case, even if empty use: "steps": []
+6. STRICT JSON structure must be followed - no additional or missing properties
+7. Each field must be enclosed in double quotes and conform to JSON syntax
+8. Steps should be specific and actionable (e.g., "Click the Submit button" rather than "Submit the form")
+9. Expected results should clearly state what the tester should observe (e.g., "User is redirected to the dashboard page")
+10. Test case descriptions should explain what functionality is being tested and why
+11. Use realistic test data examples when appropriate
+
+Your response must be VALID JSON and NOTHING ELSE - no explanations, no text outside the JSON object.
+
+If any part of the test plan is unclear, make a reasonable interpretation rather than omitting the JSON structure.`;
+                      
+                      // Process silently in the background, don't add to chat
+                      showNotification('Preparing test plan...', 'info');
+                      
+                      try {
+                        // Add user message to LLM history (but don't display in chat)
+                        const newUserMessage: ChatMessage = { 
+                          role: 'user', 
+                          content: jsonTestPlanPrompt
+                        };
+                        const updatedHistory = [...llmHistory, newUserMessage];
+                        
+                        // Update the history state
+                        setLlmHistory(updatedHistory);
+                        
+                        // Send the prompt to the LLM API
+                        LlmApiService.sendPromptToLlm(currentLlm, jsonTestPlanPrompt, updatedHistory)
+                          .then((fullResponse) => {
+                            setCanStopGeneration(false);
+                            setIsLoadingResponse(false);
+                            
+                            // Add assistant response to history
+                            setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
+                            
+                            // Set the JSON response as the test plan content
+                            setTestPlanContent(fullResponse);
+                            
+                            // Open the test plan form modal
+                            setIsTestPlanFormOpen(true);
+                          })
+                          .catch((error) => {
+                            console.error('Error generating JSON test plan:', error);
+                            setCanStopGeneration(false);
+                            setIsLoadingResponse(false);
+                            
+                            // Fallback to using the original test plan format
+                            setTestPlanContent(messageContent);
+                            setIsTestPlanFormOpen(true);
+                          });
+                      } catch (error) {
+                        console.error('Error generating JSON test plan:', error);
+                        setCanStopGeneration(false);
+                        setIsLoadingResponse(false);
+                        
+                        // Fallback to using the original test plan format
+                        setTestPlanContent(messageContent);
+                        setIsTestPlanFormOpen(true);
+                      }
+                      
+                      return;
+                    }
+                    
+                    // If not a test plan, check if it's a work item JSON plan
                     const isJsonPlan = (() => {
                       try {
                         // Check if it has a code block with JSON
@@ -2519,6 +2711,54 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
               {notification.message}
             </Alert>
           </Snackbar>
+
+          {/* Test Plan Form Dialog */}
+          <Dialog
+            open={isTestPlanFormOpen}
+            onClose={() => {
+              // Close the modal
+              setIsTestPlanFormOpen(false);
+              
+              // Ensure all loading states are reset when modal is closed manually
+              setIsLoadingResponse(false);
+              setCanStopGeneration(false); 
+              
+              // Clear any streaming message state
+              if (streamingMessageIdRef.current) {
+                streamingMessageIdRef.current = null;
+                setStreamingMessageId(null);
+              }
+              
+              // Abort any ongoing request
+              if (abortControllerRef.current) {
+                abortControllerRef.current.abort();
+                abortControllerRef.current = null;
+              }
+            }}
+            maxWidth="lg"
+            fullWidth
+            PaperProps={{
+              sx: { 
+                maxHeight: '90vh',
+                height: '90vh',
+                borderRadius: 2,
+                overflow: 'hidden',
+                boxShadow: theme.shadows[10]
+              }
+            }}
+            TransitionComponent={Slide}
+          >
+            <DialogContent sx={{ p: 0 }}>
+              {testPlanContent && (
+                <TestPlanForm
+                  testPlanContent={testPlanContent}
+                  onClose={() => setIsTestPlanFormOpen(false)}
+                  currentLanguage={currentLanguage}
+                  teamMapping={teamMapping}
+                />
+              )}
+            </DialogContent>
+          </Dialog>
       </Container>
     </Box>
   );

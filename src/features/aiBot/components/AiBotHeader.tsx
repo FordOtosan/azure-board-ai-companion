@@ -1,5 +1,5 @@
-import * as React from 'react';
 import { AppBar, Toolbar, Typography } from '@mui/material';
+import * as React from 'react';
 import '../styles/aiBot.css';
 
 export const AiBotHeader: React.FC = () => {

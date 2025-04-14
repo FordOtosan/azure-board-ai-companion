@@ -202,6 +202,12 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                 } else {
                   console.log('Create test plan functionality will be implemented later');
                 }
+              } else if (button.action === 'use_test_plan') {
+                // Call the parent's handler with the current message
+                console.log('[ChatMessages] Use Test Plan button clicked');
+                if (onUsePlan) {
+                  onUsePlan(msg);
+                }
               } else if (button.action === 'showWorkItems') {
                 // Open the Work Items Results modal
                 console.log('[ChatMessages] Show Work Items button clicked');
@@ -389,8 +395,8 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                    </Box>
                  )}
                  
-                 {/* Render navigation buttons after content if present */}
-                 {msg.content !== '' && msg.navigationButtons && renderNavigationButtons(msg)}
+                 {/* Render navigation buttons after content if present and not a high-level plan */}
+                 {msg.content !== '' && msg.navigationButtons && !hasHighLevelPlan && !hasDocumentPlan && !hasHighLevelTestPlan && renderNavigationButtons(msg)}
                  
                  {/* Action buttons */}
                  {msg.role !== 'system' && (

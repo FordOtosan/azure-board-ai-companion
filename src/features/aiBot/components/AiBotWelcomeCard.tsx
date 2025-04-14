@@ -1,5 +1,5 @@
+import { Box, Paper, Typography } from '@mui/material';
 import * as React from 'react';
-import { Paper, Typography, Box } from '@mui/material';
 import { LlmSettingsDisplay } from '../../../components/LlmSettingsDisplay';
 import '../styles/aiBot.css';
 

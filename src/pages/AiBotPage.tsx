@@ -1,6 +1,6 @@
+import { Box, CircularProgress, Container, Typography } from '@mui/material';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { Box, CircularProgress, Typography, Container } from '@mui/material';
 import { AiBotHeader } from '../features/aiBot/components/AiBotHeader';
 import { AiBotWelcomeCard } from '../features/aiBot/components/AiBotWelcomeCard';
 import '../features/aiBot/styles/aiBot.css';
