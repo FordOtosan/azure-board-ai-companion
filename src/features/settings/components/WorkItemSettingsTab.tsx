@@ -416,12 +416,33 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   };
 
   // Handle opening the field editor for a work item type
-  const openFieldEditor = (typeName: string) => {
+  const openFieldEditor = (typeName: string, fields?: WorkItemFieldConfig[]) => {
+    console.log(`Opening field editor for ${typeName}`);
+    
+    if (fields && fields.length > 0) {
+      // If fields were directly provided, use them without looking for the type config
+      console.log(`Using provided fields for ${typeName}: ${fields.length} fields`);
+      setSelectedWorkItemType(typeName);
+      setEditingFields([...fields]);
+      setFieldDialogOpen(true);
+      return;
+    }
+    
+    // Otherwise look in workItemTypes
     const typeConfig = workItemTypes.find(type => type.name === typeName);
+    
     if (typeConfig) {
+      console.log(`Found type ${typeName} with ${typeConfig.fields.length} fields in workItemTypes array`);
       setSelectedWorkItemType(typeName);
       setEditingFields([...typeConfig.fields]);
       setFieldDialogOpen(true);
+    } else {
+      console.error(`Could not find work item type ${typeName} in workItemTypes array`);
+      setSnackbar({
+        open: true,
+        message: `Could not find work item type ${typeName}`,
+        severity: 'error'
+      });
     }
   };
   
@@ -439,14 +460,55 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
   const saveFieldChanges = () => {
     if (!selectedWorkItemType) return;
     
-    setWorkItemTypes(prevTypes => 
-      prevTypes.map(type => 
-        type.name === selectedWorkItemType 
-          ? { ...type, fields: [...editingFields] } 
-          : type
-      )
-    );
+    console.log(`Saving field changes for ${selectedWorkItemType}`);
     
+    // Check if we're in the edit dialog (workItemTypes is populated)
+    if (workItemTypes.length > 0) {
+      // We're in the edit dialog, update workItemTypes directly
+      setWorkItemTypes(prevTypes => 
+        prevTypes.map(type => 
+          type.name === selectedWorkItemType 
+            ? { ...type, fields: [...editingFields] } 
+            : type
+        )
+      );
+      
+      console.log(`Updated fields in local workItemTypes array for ${selectedWorkItemType}`);
+    } else if (currentConfig) {
+      // We're editing from the main screen for a team config
+      const updatedConfig = {
+        ...currentConfig,
+        workItemTypes: currentConfig.workItemTypes.map(type => 
+          type.name === selectedWorkItemType 
+            ? { ...type, fields: [...editingFields] } 
+            : type
+        )
+      };
+      
+      // Update the config in settings
+      const updatedSettings = WorkItemSettingsService.addOrUpdateTeamConfig(
+        workItemSettings,
+        updatedConfig
+      );
+      
+      setWorkItemSettings(updatedSettings);
+      saveWorkItemSettings(updatedSettings);
+      
+      console.log(`Updated fields in team config for ${selectedWorkItemType}`);
+    } else {
+      // We're editing from the mapping manager dialog
+      // Just save the edited fields, the parent component will handle updating
+      console.log(`Edited fields for ${selectedWorkItemType} - will be saved on dialog close`);
+    }
+    
+    // Show success message
+    setSnackbar({
+      open: true,
+      message: `Fields for ${selectedWorkItemType} updated successfully`,
+      severity: 'success'
+    });
+    
+    // Close dialog and reset state
     setFieldDialogOpen(false);
     setSelectedWorkItemType(null);
   };
@@ -693,8 +755,12 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
     const rootTypes = workItemTypes
       .filter(type => !allChildTypes.includes(type.name));
     
+    // Specifically identify Bug as potentially separate root if it's not a child
+    const epicIndex = rootTypes.findIndex(type => type.name === 'Epic');
+    const bugIndex = rootTypes.findIndex(type => type.name === 'Bug');
+    
     // Recursive function to render a type and its children
-    const renderTypeNode = (type: WorkItemTypeConfig, level = 0): React.ReactNode => {
+    const renderTypeNode = (type: WorkItemTypeConfig, level = 0, isMainHierarchy = true): React.ReactNode => {
       if (!type) return null;
       
       const typeIndex = workItemTypes.findIndex(t => t.name === type.name);
@@ -712,7 +778,11 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
             sx={{ 
               pl: level * 4,
               borderLeft: level > 0 ? '1px dashed rgba(0,0,0,0.1)' : 'none',
-              ml: level > 0 ? 1 : 0
+              ml: level > 0 ? 1 : 0,
+              backgroundColor: isMainHierarchy 
+                ? (level % 2 === 0 ? 'rgba(25, 118, 210, 0.04)' : 'transparent')
+                : (level % 2 === 0 ? 'rgba(211, 47, 47, 0.04)' : 'transparent'),
+              borderRadius: '4px'
             }}
           >
             <ListItemIcon>
@@ -730,12 +800,24 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
             </ListItemIcon>
             
             <ListItemText
-              primary={type.name}
-              secondary={
-                <Typography variant="caption" color="text.secondary">
-                  {type.fields.filter(f => f.enabled).length} of {type.fields.length} fields enabled
-                  {hasChildren && ` • Parent of ${childTypes.length} types`}
+              primary={
+                <Typography 
+                  variant="body1" 
+                  sx={{ 
+                    fontWeight: type.enabled ? 'bold' : 'normal',
+                    color: type.enabled ? 'text.primary' : 'text.secondary'
+                  }}
+                >
+                  {type.name}
                 </Typography>
+              }
+              secondary={
+                type.enabled ? (
+                  <Typography variant="caption" color="text.secondary">
+                    {type.fields.filter(f => f.enabled).length} of {type.fields.length} fields enabled
+                    {hasChildren && ` • Parent of ${childTypes.length} types`}
+                  </Typography>
+                ) : null
               }
             />
             
@@ -763,7 +845,7 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
           {hasChildren && (
             <List component="div" disablePadding>
               {childTypeObjects.map(childType => 
-                childType ? renderTypeNode(childType, level + 1) : null
+                childType ? renderTypeNode(childType, level + 1, isMainHierarchy) : null
               )}
             </List>
           )}
@@ -772,9 +854,40 @@ export const WorkItemSettingsTab: React.FC<WorkItemSettingsTabProps> = ({ curren
     };
     
     return (
-      <List sx={{ width: '100%', bgcolor: 'background.paper', mb: 3 }}>
-        {rootTypes.map(type => renderTypeNode(type))}
-      </List>
+      <>
+        <Typography variant="subtitle1" sx={{ mt: 4, mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
+          Hierarchy 1: Epic → Feature → Story → Task
+        </Typography>
+        <Paper variant="outlined" sx={{ mb: 3, overflow: 'hidden' }}>
+          <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+            {rootTypes.filter(type => type.name === 'Epic').map(type => renderTypeNode(type, 0, true))}
+          </List>
+        </Paper>
+        
+        <Typography variant="subtitle1" sx={{ mt: 4, mb: 2, fontWeight: 'bold', color: 'error.main' }}>
+          Hierarchy 2: Bug → Task
+        </Typography>
+        <Paper variant="outlined" sx={{ mb: 3, overflow: 'hidden' }}>
+          <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+            {rootTypes.filter(type => type.name === 'Bug').map(type => renderTypeNode(type, 0, false))}
+          </List>
+        </Paper>
+        
+        {rootTypes.filter(type => type.name !== 'Epic' && type.name !== 'Bug').length > 0 && (
+          <>
+            <Typography variant="subtitle1" sx={{ mt: 4, mb: 2, fontWeight: 'medium' }}>
+              Other Work Item Types
+            </Typography>
+            <Paper variant="outlined" sx={{ mb: 3, overflow: 'hidden' }}>
+              <List sx={{ width: '100%', bgcolor: 'background.paper' }}>
+                {rootTypes
+                  .filter(type => type.name !== 'Epic' && type.name !== 'Bug')
+                  .map(type => renderTypeNode(type, 0, true))}
+              </List>
+            </Paper>
+          </>
+        )}
+      </>
     );
   };
 

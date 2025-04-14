@@ -1,23 +1,24 @@
 import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Collapse,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  IconButton,
-  List,
-  ListItem,
-  ListItemText,
-  Badge as MuiBadge,
-  Paper,
-  Snackbar,
-  TextField,
-  Tooltip,
-  Typography
+    Alert,
+    Box,
+    Button,
+    Chip,
+    CircularProgress,
+    Collapse,
+    Dialog,
+    DialogContent,
+    DialogTitle,
+    IconButton,
+    List,
+    ListItem,
+    ListItemText,
+    Badge as MuiBadge,
+    Paper,
+    Popover,
+    Snackbar,
+    TextField,
+    Tooltip,
+    Typography
 } from '@mui/material';
 import { WebApiTeam } from 'azure-devops-extension-api/Core';
 import * as React from 'react';
@@ -30,13 +31,13 @@ import { FileUploadModal } from './FileUploadModal';
 
 // Import additional icons for the hierarchy view
 import {
-  ArrowDropDown as ArrowDropDownIcon,
-  ArrowRight as ArrowRightIcon,
-  Article as ArticleIcon,
-  AttachFile,
-  Info as InfoIcon,
-  Send,
-  Stop
+    ArrowDropDown as ArrowDropDownIcon,
+    ArrowRight as ArrowRightIcon,
+    Article as ArticleIcon,
+    AttachFile,
+    Info as InfoIcon,
+    Send,
+    Stop
 } from '@mui/icons-material';
 
 // Define translations for this component
@@ -522,13 +523,18 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleNewConversationClick = (event: React.MouseEvent<HTMLElement>) => {
+    console.log("New conversation button clicked");
     setNewConversationAnchorEl(event.currentTarget);
   };
 
   const handleConfirmNewConversation = () => {
+    console.log("New conversation confirmed");
     setNewConversationAnchorEl(null);
     if (onNewConversation) {
+      console.log("Calling onNewConversation callback");
       onNewConversation();
+    } else {
+      console.error("onNewConversation callback is not defined");
     }
   };
 
@@ -677,6 +683,70 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         disabled={!selectedLlm || isLoading || isSummarizing}
         sx={{ flexGrow: 1 }}
       />
+
+      {/* Team Change Popover */}
+      <Popover
+        open={Boolean(anchorEl)}
+        anchorEl={anchorEl}
+        onClose={handleClosePopover}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+      >
+        <Paper sx={{ p: 2, maxWidth: 250 }}>
+          <Typography variant="subtitle1" gutterBottom>
+            {T.confirmTeamChange}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            {T.confirmTeamChangeMessage}
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+            <Button size="small" color="inherit" onClick={handleClosePopover}>
+              {T.no}
+            </Button>
+            <Button size="small" variant="contained" color="primary" onClick={handleConfirmTeamChange}>
+              {T.yes}
+            </Button>
+          </Box>
+        </Paper>
+      </Popover>
+
+      {/* New Conversation Popover */}
+      <Popover
+        open={Boolean(newConversationAnchorEl)}
+        anchorEl={newConversationAnchorEl}
+        onClose={handleCloseNewConversationPopover}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'left',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'left',
+        }}
+      >
+        <Paper sx={{ p: 2, maxWidth: 250 }}>
+          <Typography variant="subtitle1" gutterBottom>
+            {T.confirmNewConversation}
+          </Typography>
+          <Typography variant="body2" sx={{ mb: 2 }}>
+            {T.confirmNewConversationMessage}
+          </Typography>
+          <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+            <Button size="small" color="inherit" onClick={handleCloseNewConversationPopover}>
+              {T.no}
+            </Button>
+            <Button size="small" variant="contained" color="primary" onClick={handleConfirmNewConversation}>
+              {T.yes}
+            </Button>
+          </Box>
+        </Paper>
+      </Popover>
 
       <Tooltip 
         title={getFileTooltip()} 

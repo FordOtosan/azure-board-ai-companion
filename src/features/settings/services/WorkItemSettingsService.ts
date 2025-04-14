@@ -287,28 +287,33 @@ export class WorkItemSettingsService {
     
     const hierarchies: WorkItemTypeHierarchy[] = [];
     
-    // Common hierarchy patterns
+    // Common hierarchy patterns, ordered by priority
     const commonHierarchies: [string, string][] = [
+      // Priority hierarchy 1: EPIC -> FEATURE -> STORY -> TASK
       ['Epic', 'Feature'],
       ['Feature', 'User Story'],
-      ['Feature', 'Product Backlog Item'],
       ['User Story', 'Task'],
-      ['Product Backlog Item', 'Task'],
+      
+      // Priority hierarchy 2: BUG -> TASK
       ['Bug', 'Task'],
-      ['Requirement', 'Task'],
+      
+      // Other important hierarchy paths
+      ['Feature', 'Product Backlog Item'],
+      ['Product Backlog Item', 'Task'],
+      ['Product Backlog Item', 'Bug'],
+      ['User Story', 'Bug'],
+      
+      // Additional supported hierarchies
       ['Initiative', 'Epic'],
       ['Theme', 'Epic'],
       ['Epic', 'Capability'],
       ['Capability', 'Feature'],
-      // Additional common hierarchies for different system types
-      ['Feature', 'Bug'],
       ['Epic', 'Story'],
       ['Story', 'Task'],
       ['Feature', 'Story'],
       ['Epic', 'User Story'],
       ['Epic', 'Product Backlog Item'],
-      ['Product Backlog Item', 'Bug'],
-      ['User Story', 'Bug'],
+      ['Feature', 'Bug'],
       ['Test Case', 'Bug'],
       ['Feature', 'Test Case']
     ];
@@ -316,10 +321,13 @@ export class WorkItemSettingsService {
     // Check for common hierarchies
     for (const [parent, child] of commonHierarchies) {
       if (enabledTypes.includes(parent) && enabledTypes.includes(child)) {
-        hierarchies.push({ parentType: parent, childType: child });
+        // Add to hierarchies if not already present
+        if (!hierarchies.some(h => h.parentType === parent && h.childType === child)) {
+          hierarchies.push({ parentType: parent, childType: child });
+        }
         
         // Update childTypes in the parent work item type
-        const parentIndex = workItemTypes.findIndex(t => t.name === parent && t.enabled);
+        const parentIndex = workItemTypes.findIndex(t => t.name === parent);
         if (parentIndex >= 0) {
           if (!workItemTypes[parentIndex].childTypes) {
             workItemTypes[parentIndex].childTypes = [];
@@ -330,6 +338,16 @@ export class WorkItemSettingsService {
         }
       }
     }
+    
+    // Ensure all child types are properly linked to their parents
+    workItemTypes.forEach(type => {
+      if (type.childTypes && type.childTypes.length > 0) {
+        // Make sure child types exist in the work item types list
+        type.childTypes = type.childTypes.filter(childName => 
+          enabledTypes.includes(childName)
+        );
+      }
+    });
     
     // Log detected hierarchies
     console.log(`[WorkItemSettingsService] Detected ${hierarchies.length} hierarchical relationships between work item types`);

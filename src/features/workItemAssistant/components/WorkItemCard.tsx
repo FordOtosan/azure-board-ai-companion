@@ -153,6 +153,13 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
     setEditDialogOpen(true);
   };
   
+  // New handler specifically for Edit Fields functionality
+  const handleEditFields = () => {
+    // This will open the same dialog but with focus on the fields
+    setCurrentEditItem({ item, path });
+    setEditDialogOpen(true);
+  };
+  
   const handleDeleteItem = () => {
     const newWorkItems = deleteWorkItemAtPath(workItems, path);
     setWorkItems(newWorkItems);
@@ -278,16 +285,46 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
                   }}
                   sx={{ 
                     color: theme.palette.primary.main,
-                    bgcolor: theme.palette.mode === 'light' ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.2)',
+                    bgcolor: 'rgba(255, 255, 255, 0.8)',
                     borderRadius: '4px',
                     padding: '4px',
                     '&:hover': {
-                      bgcolor: theme.palette.mode === 'light' ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.3)'
+                      bgcolor: 'rgba(255, 255, 255, 0.9)'
                     }
                   }}
                 >
                   <EditIcon fontSize="small" />
                 </IconButton>
+              </Tooltip>
+              <Tooltip title={T.editFields}>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleEditFields();
+                  }}
+                  sx={{ 
+                    ml: 1,
+                    borderRadius: '4px',
+                    color: theme.palette.primary.main,
+                    borderColor: theme.palette.divider,
+                    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                    '&:hover': {
+                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                      borderColor: theme.palette.primary.main,
+                    },
+                    fontSize: '0.75rem',
+                    py: 0.5,
+                    px: 1,
+                    height: '28px',
+                    minWidth: 'auto',
+                    textTransform: 'none',
+                    fontWeight: 500
+                  }}
+                >
+                  {T.editFields}
+                </Button>
               </Tooltip>
               <Tooltip title={T.deleteWorkItem}>
                 <IconButton 

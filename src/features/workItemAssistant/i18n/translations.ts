@@ -43,13 +43,24 @@ export const workItemTranslations = {
     viewTopWorkItem: 'View Top Work Item',
     creationComplete: 'Complete',
     creationProgress: '%% Complete',
+    editFields: 'Edit Fields',
     // Work item type translations
     epic: 'Epic',
     feature: 'Feature',
     userStory: 'User Story',
     productBacklogItem: 'Product Backlog Item',
     task: 'Task',
-    bug: 'Bug'
+    bug: 'Bug',
+    workItemAssistant: {
+      settings: {
+        workItem: {
+          hierarchy: 'Hierarchy',
+          hierarchyOne: 'Hierarchy 1',
+          hierarchyTwo: 'Hierarchy 2',
+          otherTypes: 'Other Work Item Types',
+        },
+      },
+    },
   },
   tr: {
     createWorkItems: 'İş Öğeleri Oluştur',
@@ -93,13 +104,24 @@ export const workItemTranslations = {
     viewTopWorkItem: 'Üst İş Öğesini Görüntüle',
     creationComplete: 'Tamamlandı',
     creationProgress: '%% Tamamlandı',
+    editFields: 'Alanları Düzenle',
     // Work item type translations
     epic: 'Epik',
     feature: 'Özellik',
     userStory: 'Kullanıcı Hikayesi',
     productBacklogItem: 'Ürün İş Listesi Öğesi',
     task: 'Görev',
-    bug: 'Hata'
+    bug: 'Hata',
+    workItemAssistant: {
+      settings: {
+        workItem: {
+          hierarchy: 'Hiyerarşi',
+          hierarchyOne: 'Hiyerarşi 1',
+          hierarchyTwo: 'Hiyerarşi 2',
+          otherTypes: 'Diğer İş Öğesi Türleri',
+        },
+      },
+    },
   }
 } as const;
 

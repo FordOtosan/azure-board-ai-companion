@@ -130,6 +130,11 @@ const ChatPage: React.FC = () => {
   // Add new state for team work item mapping
   const [teamWorkItemMapping, setTeamWorkItemMapping] = React.useState<TeamWorkItemConfig | null>(null);
 
+  // Add an effect to log messages changes
+  React.useEffect(() => {
+    console.log("Messages state updated. Count:", messages.length);
+  }, [messages]);
+
   React.useEffect(() => {
     // Initialize SDK, get Org/Project info, fetch Teams, and LLM Settings
     const initializeAndFetchAll = async () => {
@@ -338,25 +343,27 @@ const ChatPage: React.FC = () => {
 
   // New handler to go back to team selection
   const handleChangeTeamRequest = () => {
-      setSelectedTeam(null); // Reset selected team
-      setSelectedAction(null); // Reset selected action
-      setTeamError(null); // Clear any potential team error
-      // Add a system message to indicate returning to team selection
-       const backToTeamsMessage: Message = {
-           id: `back-to-teams-${Date.now()}`,
-           role: 'system',
-           tKey: 'welcomeSelectTeam' // Use translation key
-       };
-       // Filter out old system messages more reliably by checking for tKey presence maybe?
-       // Or just rely on the IDs we already filter.
-       setMessages(prev => [
-           ...prev.filter(m => 
-               m.id !== 'welcome' && 
-               !String(m.id).startsWith('team-select-') && // Keep filtering by ID for now
-               !String(m.id).startsWith('action-') // Keep filtering by ID for now
-           ), 
-           backToTeamsMessage
-       ]);
+    console.log("handleChangeTeamRequest called");
+    
+    // Reset team state
+    setSelectedTeam(null);
+    setSelectedAction(null);
+    setTeamError(null);
+    
+    // Clear all messages
+    setMessages([]);
+    
+    // Add a system message to indicate returning to team selection
+    setTimeout(() => {
+      const backToTeamsMessage: Message = {
+        id: `back-to-teams-${Date.now()}`,
+        role: 'system',
+        tKey: 'welcomeSelectTeam' // Use translation key
+      };
+      setMessages([backToTeamsMessage]);
+    }, 100);
+    
+    console.log("Returned to team selection");
   };
 
   const handleLanguageChange = (
@@ -814,15 +821,32 @@ const ChatPage: React.FC = () => {
   
   // Enhance handleNewConversation with notification
   const handleNewConversation = () => {
-    // Clear all messages except system/team context messages
-    const systemMessages = messages.filter(m => 
-      m.role === 'system' && (
-        String(m.id).startsWith('team-select-') || 
-        String(m.id).startsWith('action-')
-      )
+    console.log("handleNewConversation called");
+    console.log("Current messages count:", messages.length);
+    
+    // Force clear all messages first
+    setMessages([]);
+    
+    // Then immediately re-add any system context messages (team selection)
+    const teamContextMessage = messages.find(m => 
+      m.role === 'system' && String(m.id).startsWith('team-select-')
     );
     
-    setMessages(systemMessages);
+    const actionMessage = messages.find(m => 
+      m.role === 'system' && String(m.id).startsWith('action-')
+    );
+    
+    // Re-add system messages if they exist
+    setTimeout(() => {
+      const systemMessages = [];
+      if (teamContextMessage) systemMessages.push(teamContextMessage);
+      if (actionMessage) systemMessages.push(actionMessage);
+      
+      console.log("System messages to keep:", systemMessages.length);
+      if (systemMessages.length > 0) {
+        setMessages(systemMessages);
+      }
+    }, 100);
     
     // Keep only the system context message for the current team and action
     const systemContextMessages = llmHistory.filter(m => 
@@ -832,10 +856,12 @@ const ChatPage: React.FC = () => {
       )
     );
     
+    console.log("LLM history system messages to keep:", systemContextMessages.length);
     setLlmHistory(systemContextMessages);
     
     // Clear any streaming state
     if (streamingMessageIdRef.current) {
+      console.log("Clearing streaming message ref:", streamingMessageIdRef.current);
       streamingMessageIdRef.current = null;
       setStreamingMessageId(null);
     }
@@ -850,6 +876,8 @@ const ChatPage: React.FC = () => {
         : 'Yeni bir konuşma başlatıldı',
       'info'
     );
+    
+    console.log("New conversation started");
   };
 
   // Count total work items in results (including children)
@@ -892,6 +920,153 @@ const ChatPage: React.FC = () => {
         ))}
       </Box>
     );
+  };
+
+  // Add this function after other handler functions and before the return statement
+  // Handler for test plan generation based on JSON plan
+  const handleContinueWithTestPlan = (msg: Message) => {
+    if (!msg.content || !currentLlm) return;
+    
+    // Get the message content
+    const messageContent = msg.content;
+    
+    // Set loading state
+    setIsLoadingResponse(true);
+    setCanStopGeneration(true);
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+    
+    console.log('[ChatPage] Generating test plan from JSON plan');
+    
+    // Create a prompt for test plan generation
+    const testPlanPrompt = `
+# Generate Test Plan from Azure DevOps Work Items
+
+## Input Work Items JSON Plan:
+${messageContent}
+
+## Task:
+Create a comprehensive test plan for the work items described in the JSON plan above.
+
+## Test Plan Requirements:
+1. Organize tests hierarchically to match the work item structure
+2. For each user story or feature, create appropriate test cases
+3. Include both positive and negative test scenarios
+4. Add detailed test steps with expected results for each test case
+5. Include test cases for edge cases and error conditions
+6. Consider both functional and non-functional testing requirements
+7. Specify test prerequisites and environment requirements where needed
+
+## Test Plan Output Format:
+Provide a detailed test plan document in markdown format, including:
+
+1. Introduction and overview
+2. Test scope and objectives
+3. Test environment requirements
+4. Test scenarios organized by work item/feature
+5. Detailed test cases with steps and expected results
+6. Test coverage analysis
+
+## Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}
+
+Please provide a comprehensive test plan that ensures quality verification of all requirements and features in the work items.`;
+
+    // Create new messages
+    const userMessageId = Date.now();
+    const userMessage: Message = {
+      id: userMessageId,
+      role: 'user',
+      content: 'Generate a test plan for the work items'
+    };
+    
+    const testPlanMessageId = Date.now() + 1;
+    const testPlanMessage: Message = {
+      id: testPlanMessageId,
+      role: 'assistant',
+      content: '',
+      isStreaming: true
+    };
+    
+    // Add both messages to the chat
+    setMessages(prev => [...prev, userMessage, testPlanMessage]);
+    
+    // Set streaming state for the plan
+    setStreamingMessageId(testPlanMessageId);
+    streamingMessageIdRef.current = testPlanMessageId;
+    
+    try {
+      // Add user message to LLM history
+      const newUserMessage: ChatMessage = { 
+        role: 'user', 
+        content: testPlanPrompt
+      };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
+      
+      // Stream LLM response
+      LlmApiService.streamPromptToLlm(
+        currentLlm,
+        testPlanPrompt,
+        updateStreamingMessage,
+        (fullResponse) => {
+          handleStreamComplete(fullResponse);
+          setCanStopGeneration(false);
+          // Add assistant response to history
+          setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
+        },
+        (error) => {
+          handleStreamError(error);
+          setCanStopGeneration(false);
+        },
+        abortControllerRef.current,
+        updatedHistory
+      );
+    } catch (error) {
+      console.error('Error generating test plan:', error);
+      handleStreamError(error as Error);
+      setCanStopGeneration(false);
+    }
+  };
+
+  // Update the renderNavigationButtons method in the component to use the new handler
+  const updateNavigationButtonHandler = (button: { action?: string }) => {
+    if (button.action === 'createTestPlan') {
+      // Get the last JSON plan message
+      const jsonPlanMessage = [...messages].reverse().find(msg => isJsonPlan(msg.content || ''));
+      if (jsonPlanMessage) {
+        handleContinueWithTestPlan(jsonPlanMessage);
+      } else {
+        showNotification(
+          currentLanguage === 'en' 
+            ? 'No JSON plan found to create test plan' 
+            : 'Test planı oluşturmak için JSON planı bulunamadı',
+          'warning'
+        );
+      }
+    }
+  };
+
+  // Helper function to check if content is a JSON plan
+  const isJsonPlan = (content: string): boolean => {
+    try {
+      // Check if it has a code block with JSON
+      if (content.includes('```json') || content.includes('```')) {
+        return true;
+      }
+      
+      // Try to see if the entire content is JSON
+      if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
+        const parsed = JSON.parse(content);
+        return parsed && parsed.workItems && Array.isArray(parsed.workItems);
+      }
+      
+      return false;
+    } catch (e) {
+      return false;
+    }
   };
 
   // --- Render Logic --- 
@@ -1180,6 +1355,7 @@ const ChatPage: React.FC = () => {
                   currentLanguage={currentLanguage}
                   translations={translations}
                   workItemSysPrompt={workItemSysPrompt}
+                  onContinueWithTestPlan={handleContinueWithTestPlan}
                   onUsePlan={(msg) => {
                     // Get the message content
                     const messageContent = msg.content || '';
@@ -1777,7 +1953,7 @@ Please provide the complete JSON structure containing all work items from the hi
                         navigationButtons: [
                           {
                             label: currentLanguage === 'en' ? 'Go to Work Items' : 'İş Öğelerine Git',
-                            url: results[0]?.url || '',
+                            url: `https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`,
                             icon: 'open'
                           },
                           {

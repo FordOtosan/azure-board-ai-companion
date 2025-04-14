@@ -27,6 +27,7 @@ import { settingsTranslations } from '../i18n/translations';
 import {
     WorkItemMapping,
     WorkItemSettings,
+    WorkItemSettingsService,
     WorkItemTypeConfig
 } from '../services/WorkItemSettingsService';
 import { WorkItemTypeHierarchy } from './WorkItemTypeHierarchy';
@@ -100,13 +101,17 @@ export const WorkItemMappingManager: React.FC<WorkItemMappingManagerProps> = ({
   const handleSaveMapping = () => {
     if (!editingMapping) return;
     
+    console.log(`Saving mapping ${mappingName} with ${workItemTypes.length} work item types`);
+    
     // Update the mapping with form values
     const updatedMapping: WorkItemMapping = {
       ...editingMapping,
       name: mappingName.trim() || editingMapping.name,
       isDefault: true, // Always default for project level
       assignedTeamIds: [], // Empty as all teams use this mapping
-      workItemTypes
+      workItemTypes,
+      // Redetect hierarchies based on the current work item types
+      hierarchies: WorkItemSettingsService.detectHierarchiesFromTypes([...workItemTypes])
     };
     
     // Add or update the mapping in settings
@@ -116,9 +121,11 @@ export const WorkItemMappingManager: React.FC<WorkItemMappingManagerProps> = ({
     if (existingIndex >= 0) {
       // Update existing mapping
       updatedSettings.mappings[existingIndex] = updatedMapping;
+      console.log(`Updated existing mapping at index ${existingIndex}`);
     } else {
       // Add new mapping and remove any existing ones since we're now project-level
       updatedSettings.mappings = [updatedMapping];
+      console.log('Added new mapping');
     }
     
     // Update settings
@@ -302,7 +309,16 @@ export const WorkItemMappingManager: React.FC<WorkItemMappingManagerProps> = ({
             workItemTypes={workItemTypes}
             onChange={setWorkItemTypes}
             currentLanguage={currentLanguage}
-            onEditFields={onEditFields}
+            onEditFields={(typeName, fields) => {
+              // Find the type in our local workItemTypes array, not relying on parent component state
+              const typeConfig = workItemTypes.find(type => type.name === typeName);
+              if (typeConfig) {
+                // Pass both the type name and the fields
+                onEditFields(typeName, typeConfig.fields);
+              } else {
+                console.error(`Could not find work item type ${typeName} in local workItemTypes array`);
+              }
+            }}
           />
         </DialogContent>
         <DialogActions>

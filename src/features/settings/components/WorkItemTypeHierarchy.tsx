@@ -13,13 +13,12 @@ import {
     ListItem,
     ListItemIcon,
     ListItemText,
-    Paper,
     Tooltip,
     Typography
 } from '@mui/material';
 import React, { useState } from 'react';
 import { Language } from '../../../translations';
-import { settingsTranslations } from '../i18n/translations';
+import { getTranslations } from '../i18n/translations';
 import { WorkItemFieldConfig, WorkItemTypeConfig } from '../services/WorkItemSettingsService';
 
 interface WorkItemTypeHierarchyProps {
@@ -38,7 +37,7 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
   currentLanguage,
   onEditFields
 }) => {
-  const T = settingsTranslations[currentLanguage];
+  const translations = getTranslations(currentLanguage);
   
   // Track expanded state for each type
   const [expandedTypes, setExpandedTypes] = useState<Record<string, boolean>>({});
@@ -122,8 +121,23 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
     return workItemTypes.findIndex(t => t.name === typeName);
   };
   
+  // Get root types and specifically identify Epic and Bug
+  const rootTypes = hierarchyLevels['root'] || [];
+  const epicType = rootTypes.find(type => type.name === 'Epic');
+  const bugType = rootTypes.find(type => type.name === 'Bug');
+  const otherTypes = rootTypes.filter(type => type.name !== 'Epic' && type.name !== 'Bug');
+  
+  // Initialize Epic and Bug as expanded by default
+  React.useEffect(() => {
+    setExpandedTypes(prev => ({
+      ...prev,
+      'Epic': true,
+      'Bug': true
+    }));
+  }, []);
+  
   // Render a single work item type with its children
-  const renderWorkItemType = (type: WorkItemTypeConfig, level: number = 0, isLastChild: boolean = true, parentLastChild: boolean[] = []) => {
+  const renderWorkItemType = (type: WorkItemTypeConfig, level: number = 0, isLastChild: boolean = true, parentLastChild: boolean[] = [], isMainHierarchy: boolean = true) => {
     const typeIndex = findTypeIndex(type.name);
     const hasChildren = hierarchyLevels[type.name]?.length > 0;
     const isExpanded = expandedTypes[type.name] || false;
@@ -137,7 +151,16 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
             pl: level > 0 ? 2 : 1, 
             position: 'relative',
             pt: 0.5,
-            pb: 0.5
+            pb: 0.5,
+            backgroundColor: isMainHierarchy 
+              ? (level % 2 === 0 ? 'rgba(25, 118, 210, 0.04)' : 'transparent')
+              : (level % 2 === 0 ? 'rgba(211, 47, 47, 0.04)' : 'transparent'),
+            borderRadius: level === 0 ? 1 : 0,
+            '&:hover': {
+              backgroundColor: isMainHierarchy 
+                ? 'rgba(25, 118, 210, 0.08)'
+                : 'rgba(211, 47, 47, 0.08)',
+            }
           }}
         >
           {/* Vertical connector lines from parent items */}
@@ -151,7 +174,8 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
                   top: 0,
                   bottom: 0,
                   width: '1px',
-                  bgcolor: 'divider',
+                  bgcolor: isMainHierarchy ? 'primary.light' : 'error.light',
+                  opacity: 0.5,
                   zIndex: 1
                 }}
               />
@@ -166,7 +190,8 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
                 left: `${(level - 1) * 24 + 6}px`,
                 width: '18px',
                 height: '1px',
-                bgcolor: 'divider',
+                bgcolor: isMainHierarchy ? 'primary.light' : 'error.light',
+                opacity: 0.5,
                 top: '50%',
                 zIndex: 1
               }}
@@ -197,7 +222,7 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
               onChange={() => handleToggleEnabled(typeIndex)}
               tabIndex={-1}
               disableRipple
-              color="primary"
+              color={isMainHierarchy ? "primary" : "error"}
             />
           </ListItemIcon>
           
@@ -213,18 +238,32 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
               </Typography>
             }
             secondary={
-              <Typography variant="caption" color="text.secondary">
-                {type.fields.filter(f => f.enabled).length} {T.fieldsActive}
-              </Typography>
+              type.enabled ? (
+                <Typography variant="caption" color="text.secondary">
+                  {type.fields.filter(f => f.enabled).length} {translations.fieldsActive}
+                </Typography>
+              ) : null
             }
           />
           
           {onEditFields && (
-            <Tooltip title={T.editFields}>
+            <Tooltip title={translations.editFields}>
               <IconButton 
                 size="small" 
-                onClick={() => onEditFields(type.name, type.fields)}
-                color="primary"
+                onClick={() => {
+                  console.log(`Edit Fields clicked for ${type.name} with ${type.fields.length} fields`);
+                  onEditFields(type.name, type.fields);
+                }}
+                color={isMainHierarchy ? "primary" : "error"}
+                sx={{
+                  border: '1px solid',
+                  borderColor: isMainHierarchy ? 'primary.main' : 'error.main',
+                  ml: 1,
+                  '&:hover': {
+                    bgcolor: isMainHierarchy ? 'primary.light' : 'error.light',
+                    color: 'primary.contrastText'
+                  }
+                }}
               >
                 <EditIcon fontSize="small" />
               </IconButton>
@@ -240,7 +279,8 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
                   childType, 
                   level + 1, 
                   idx === childItems.length - 1,
-                  [...parentLastChild, isLastChild]
+                  [...parentLastChild, isLastChild],
+                  isMainHierarchy
                 )
               )}
             </List>
@@ -250,15 +290,32 @@ export const WorkItemTypeHierarchy: React.FC<WorkItemTypeHierarchyProps> = ({
     );
   };
   
-  const rootItems = hierarchyLevels['root'];
-  
   return (
-    <Paper variant="outlined" sx={{ mt: 2 }}>
-      <List sx={{ width: '100%', bgcolor: 'background.paper', py: 1 }}>
-        {rootItems.map((type, idx) => 
-          renderWorkItemType(type, 0, idx === rootItems.length - 1, [])
-        )}
+    <div>
+      <Typography variant="subtitle1" fontWeight="bold">
+        {translations.hierarchy ? `${translations.hierarchy} 1` : 'Hierarchy 1'}
+      </Typography>
+      <List component="div" disablePadding>
+        {epicType && renderWorkItemType(epicType, 0, true)}
       </List>
-    </Paper>
+      
+      <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 3 }}>
+        {translations.hierarchy ? `${translations.hierarchy} 2` : 'Hierarchy 2'}
+      </Typography>
+      <List component="div" disablePadding>
+        {bugType && renderWorkItemType(bugType, 0, true)}
+      </List>
+      
+      {otherTypes.length > 0 && (
+        <>
+          <Typography variant="subtitle1" fontWeight="bold" sx={{ mt: 3 }}>
+            {translations.workItemType ? translations.workItemType : 'Other Work Item Types'}
+          </Typography>
+          <List component="div" disablePadding>
+            {otherTypes.map((type) => renderWorkItemType(type, 0, false))}
+          </List>
+        </>
+      )}
+    </div>
   );
 }; 

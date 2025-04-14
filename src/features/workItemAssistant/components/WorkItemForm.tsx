@@ -186,7 +186,7 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       // Log patch document for debugging
       console.log(`Patch document for work item ${type} - ${fields['System.Title']}:`, JSON.stringify(patchDocument, null, 2));
       
-      const response = await fetch(url, {
+      let response = await fetch(url, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${accessToken}`,
@@ -198,6 +198,43 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       if (!response.ok) {
         const responseText = await response.text();
         console.error(`Azure DevOps API error response for ${type} - ${fields['System.Title']}:`, responseText);
+        
+        // Check for area path specific error (TF401347)
+        if (responseText.includes('TF401347') && responseText.includes('System.AreaPath')) {
+          console.warn('Detected area path error TF401347, retrying with just project name');
+          
+          // Find and remove the area path from patch document
+          const updatedPatchDocument = patchDocument.filter(
+            patch => !patch.path.includes('System.AreaPath')
+          );
+          
+          // Add project root area path
+          updatedPatchDocument.push({
+            op: "add",
+            path: `/fields/System.AreaPath`,
+            value: projectId // Just use project ID as area path
+          });
+          
+          console.log('Retrying with updated patch document:', JSON.stringify(updatedPatchDocument, null, 2));
+          
+          // Retry with updated patch document
+          response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json-patch+json'
+            },
+            body: JSON.stringify(updatedPatchDocument)
+          });
+          
+          if (!response.ok) {
+            const retryResponseText = await response.text();
+            console.error(`Retry failed with error:`, retryResponseText);
+            throw new Error(`Failed to create work item on retry: ${response.status} ${response.statusText}`);
+          }
+          
+          return await response.json();
+        }
         
         let errorMessage = `Failed to create work item: ${response.status} ${response.statusText}`;
         
@@ -332,87 +369,112 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       
       // Helper function to create a work item and its children
       const createWorkItemHierarchy = async (item: any): Promise<WorkItemCreationResult> => {
-        // Add delay before creating each work item
-        await delay(200);
-        console.log(`Creating work item: ${item.type} - ${item.title}`);
-        
-        // Update the current item being created
-        setCurrentItemBeingCreated(`${item.type}: ${item.title}`);
-        
-        // Create main fields object with safe defaults
-        const fields: Record<string, any> = {
-          'System.Title': item.title,
-          'System.Description': item.description || 'No description provided',
-          'Microsoft.VSTS.Common.Priority': 2 // Default priority
-        };
-        
-        // Add acceptance criteria if present, or use default
-        if (item.acceptanceCriteria) {
-          // Handle array of acceptance criteria
-          const criteriaValue = Array.isArray(item.acceptanceCriteria) 
-            ? item.acceptanceCriteria.join("\n") 
-            : item.acceptanceCriteria;
+        try {
+          // Add delay before creating each work item
+          await delay(200);
+          console.log(`Creating work item: ${item.type} - ${item.title}`);
           
-          fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = criteriaValue;
-        }
-        
-        // Add any additional fields
-        if (item.additionalFields) {
-          for (const [key, value] of Object.entries(item.additionalFields)) {
-            // Skip empty values
-            if (value === null || value === undefined || value === '') {
-              continue;
-            }
+          // Update the current item being created
+          setCurrentItemBeingCreated(`${item.type}: ${item.title}`);
+          
+          // Create main fields object with safe defaults
+          const fields: Record<string, any> = {
+            'System.Title': item.title,
+            'System.Description': item.description || 'No description provided',
+            'Microsoft.VSTS.Common.Priority': 2, // Default priority
+            // Use just the project name for Area Path to be more resilient
+            'System.AreaPath': projectName // Use only project name to avoid tree name errors
+          };
+          
+          console.log(`Setting Area Path for work item: ${fields['System.AreaPath']}`);
+          
+          // Add acceptance criteria if present, or use default
+          if (item.acceptanceCriteria) {
+            // Handle array of acceptance criteria
+            const criteriaValue = Array.isArray(item.acceptanceCriteria) 
+              ? item.acceptanceCriteria.join("\n") 
+              : item.acceptanceCriteria;
             
-            // Handle numeric fields with parsing
-            if (key === 'Microsoft.VSTS.Scheduling.StoryPoints' || 
-                key === 'Microsoft.VSTS.Scheduling.Effort' ||
-                key === 'Microsoft.VSTS.Scheduling.RemainingWork' ||
-                key === 'Microsoft.VSTS.Scheduling.OriginalEstimate') {
-              fields[key] = parseFloat(value as string) || 0;
-            } else if (key === 'Microsoft.VSTS.Common.Priority') {
-              fields[key] = parseInt(value as string) || 2;
-            } else {
-              fields[key] = value;
+            fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = criteriaValue;
+          }
+          
+          // Add any additional fields
+          if (item.additionalFields) {
+            for (const [key, value] of Object.entries(item.additionalFields)) {
+              // Skip empty values
+              if (value === null || value === undefined || value === '') {
+                continue;
+              }
+              
+              // Skip System.AreaPath to avoid tree name errors
+              if (key === 'System.AreaPath') {
+                console.log('Ignoring explicitly set Area Path to avoid potential errors');
+                continue;
+              }
+              
+              // Handle numeric fields with parsing
+              if (key === 'Microsoft.VSTS.Scheduling.StoryPoints' || 
+                  key === 'Microsoft.VSTS.Scheduling.Effort' ||
+                  key === 'Microsoft.VSTS.Scheduling.RemainingWork' ||
+                  key === 'Microsoft.VSTS.Scheduling.OriginalEstimate') {
+                fields[key] = parseFloat(value as string) || 0;
+              } else if (key === 'Microsoft.VSTS.Common.Priority') {
+                fields[key] = parseInt(value as string) || 2;
+              } else {
+                fields[key] = value;
+              }
             }
           }
-        }
-        
-        // Create the work item using direct API call
-        const createdItem = await createWorkItem(item.type, fields, projectName);
-        
-        // Update progress and completed items count
-        completedItems++;
-        setExactCompletedItems(prev => prev + 1);
-        const progress = Math.min(Math.round((completedItems / totalItems) * 100), 100);
-        setCreationProgress(progress);
-        
-        // Create children sequentially if they exist
-        const childResults: WorkItemCreationResult[] = [];
-        
-        if (item.children && item.children.length > 0) {
-          // Process children one at a time in sequential order
-          for (const child of item.children) {
-            // Create child work item (with its own children recursively)
-            const childResult = await createWorkItemHierarchy(child);
-            childResults.push(childResult);
-            
-            // Create parent-child relationship
-            await createParentChildLink(childResult.id, createdItem.id, projectName);
-            
-            // Small delay after linking
-            await delay(100);
+          
+          // Create the work item using direct API call
+          const createdItem = await createWorkItem(item.type, fields, projectName);
+          
+          // Update progress and completed items count
+          completedItems++;
+          setExactCompletedItems(prev => prev + 1);
+          const progress = Math.min(Math.round((completedItems / totalItems) * 100), 100);
+          setCreationProgress(progress);
+          
+          // Create children sequentially if they exist
+          const childResults: WorkItemCreationResult[] = [];
+          
+          if (item.children && item.children.length > 0) {
+            // Process children one at a time in sequential order
+            for (const child of item.children) {
+              try {
+                // Create child work item (with its own children recursively)
+                const childResult = await createWorkItemHierarchy(child);
+                childResults.push(childResult);
+                
+                // Create parent-child relationship
+                await createParentChildLink(childResult.id, createdItem.id, projectName);
+                
+                // Small delay after linking
+                await delay(100);
+              } catch (childError) {
+                console.error(`Error creating child work item ${child.title}:`, childError);
+                // Continue with next child if one fails
+                setNotification({
+                  open: true,
+                  message: `Warning: Failed to create child work item: ${child.title}`,
+                  severity: 'error'
+                });
+              }
+            }
           }
+          
+          // Format the result
+          return {
+            id: createdItem.id,
+            title: item.title,
+            type: item.type,
+            url: createdItem._links?.web?.href || '',
+            children: childResults.length > 0 ? childResults : undefined
+          };
+        } catch (error) {
+          console.error(`Error creating work item ${item.title}:`, error);
+          throw error;
         }
-        
-        // Format the result
-        return {
-          id: createdItem.id,
-          title: item.title,
-          type: item.type,
-          url: createdItem._links?.web?.href || '',
-          children: childResults.length > 0 ? childResults : undefined
-        };
       };
       
       // Process each top-level work item one after another

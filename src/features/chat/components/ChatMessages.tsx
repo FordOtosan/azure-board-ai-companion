@@ -3,6 +3,7 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined'; // Import icon
 import ReplayIcon from '@mui/icons-material/Replay';
 import { Box, Button, IconButton, Tooltip } from '@mui/material'; // Add Button component
 import * as React from 'react';
+import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
 
 // Import the shared Language type and translations structure
 import { Language, translations } from '../../../translations';
@@ -28,6 +29,7 @@ interface ChatMessagesProps {
   onRetry?: (message: Message) => void;
   onCreateWorkItems?: (message: Message) => void;
   onUsePlan?: (message: Message) => void;
+  onContinueWithTestPlan?: (message: Message) => void; // Add new prop for test plan
 }
 
 // Add translations for JSON plan
@@ -50,7 +52,7 @@ const componentTranslations = {
   }
 } as const;
 
-export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLanguage, translations, workItemSysPrompt, onRetry, onCreateWorkItems, onUsePlan }) => {
+export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLanguage, translations, workItemSysPrompt, onRetry, onCreateWorkItems, onUsePlan, onContinueWithTestPlan }) => {
   // Scroll to bottom ref
   const messagesEndRef = React.useRef<HTMLDivElement>(null);
   // State for copied message
@@ -162,8 +164,13 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
               if (button.url) {
                 window.open(button.url, '_blank');
               } else if (button.action === 'createTestPlan') {
-                // This will be implemented later
-                console.log('Create test plan functionality will be implemented later');
+                // Call the parent's handler with the message that contains the JSON plan
+                const jsonPlanMessage = messages.find(m => isJsonPlan(m.content || ''));
+                if (jsonPlanMessage && onContinueWithTestPlan) {
+                  onContinueWithTestPlan(jsonPlanMessage);
+                } else {
+                  console.log('Create test plan functionality will be implemented later');
+                }
               }
             }}
             sx={{ 
@@ -236,8 +243,8 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                      currentLanguage={currentLanguage}
                      onUsePlan={() => onUsePlan?.(msg)}
                    />
-                 ) : hasJsonPlan ? (
-                   // Display a button instead of the JSON content
+                 ) : hasJsonPlan && !isStreaming ? (
+                   // Display a button instead of the JSON content - only for non-streaming JSON plans
                    <Box sx={{ 
                      p: 2, 
                      backgroundColor: 'background.paper', 
@@ -254,7 +261,20 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                          variant="contained"
                          color="primary"
                          startIcon={<Launch />}
-                         onClick={() => console.log('View created items - to be implemented')}
+                         onClick={async () => {
+                           try {
+                             // Get organization and project info
+                             const orgProjectInfo = await getOrganizationAndProject();
+                             if (orgProjectInfo.organizationName && orgProjectInfo.projectName) {
+                               // Open the recently created work items URL in a new tab
+                               window.open(`https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`, '_blank');
+                             } else {
+                               console.error('Organization or project name not available');
+                             }
+                           } catch (error) {
+                             console.error('Error getting organization and project info:', error);
+                           }
+                         }}
                          sx={{ mb: 1, width: '100%' }}
                        >
                          {currentLanguage === 'en' ? 'Go to Created Items' : 'Oluşturulan Öğelere Git'}
@@ -263,7 +283,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                          variant="outlined"
                          color="primary"
                          startIcon={<PlaylistAddCheck />}
-                         onClick={() => console.log('Continue with test plan - to be implemented')}
+                         onClick={() => onContinueWithTestPlan ? onContinueWithTestPlan(msg) : console.log('Continue with test plan - to be implemented')}
                          sx={{ width: '100%' }}
                        >
                          {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
@@ -274,6 +294,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                    // Render navigation buttons for empty content messages with navigationButtons
                    renderNavigationButtons(msg)
                  ) : (
+                   // Render normal or streaming message content
                    <Box sx={{ position: 'relative', width: '100%' }}>
                      <MarkdownMessage
                        content={messageContent}
