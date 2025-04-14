@@ -972,11 +972,7 @@ Your ONLY response must be a structured plan starting with ##HIGHLEVELTESTPLAN##
 
 STRICT OUTPUT FORMAT:
 1. Start with ##HIGHLEVELTESTPLAN## on the first line
-2. Each line must be EXACTLY in format "[Type]: [Title]" where Type is one of: ${
-      teamWorkItemMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ') || 
-      teamMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name).join(', ') || 
-      'Test Plan, Test Suite, Test Case'
-    }
+2. Each line must be EXACTLY in format "[Type]: [Title]" where Type is one of: 'Test Plan, Test Suite, Test Case'
 3. Use 2 spaces for each level of indentation
 4. NO descriptions, notes, explanations, or any other text
 5. NO markdown, bullets, asterisks, or any formatting
@@ -997,7 +993,7 @@ Test Plan: Customer Management System Test Plan
     Test Case: Verify Profile Information Updates
     Test Case: Test Profile Picture Upload Functionality
 
-Based on the JSON plan:
+Based on the JSON plan (this is the content you will use):
 ${messageContent}
 
 ## Use language: ${currentLanguage === 'en' ? 'English' : 'Turkish'}`;
