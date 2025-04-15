@@ -427,6 +427,9 @@ Priority: [Priority level]
 
     // Store the full response for when streaming completes
     let fullResponse = '';
+    
+    // Buffer for accumulating partial JSON chunks (for Gemini)
+    let partialJsonBuffer = '';
 
     try {
       if (config.provider === 'azure-openai' || config.provider === 'openai') {
@@ -494,6 +497,15 @@ Priority: [Priority level]
               }
 
               if (done) {
+                // Process any remaining buffer data before completing
+                if (partialJsonBuffer) {
+                  try {
+                    processBufferedData(partialJsonBuffer);
+                  } catch (e) {
+                    console.warn('Error processing final buffer data:', e);
+                  }
+                }
+                
                 // Stream complete, call the complete callback
                 onComplete(fullResponse);
                 return Promise.resolve();
@@ -524,6 +536,123 @@ Priority: [Priority level]
 
               // Continue reading the stream
               return reader.read().then(processStream);
+            };
+
+            // Function to process buffered data and extract JSON objects
+            const processBufferedData = (buffer: string) => {
+              // Log raw buffer for debugging
+              console.debug("Processing buffer:", buffer.substring(0, 100) + (buffer.length > 100 ? "..." : ""));
+              
+              let foundValidContent = false;
+              
+              // First try: process as line-delimited JSON objects
+              const lines = buffer.split('\n');
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                
+                try {
+                  // Try to find a valid JSON object in the line
+                  const match = line.match(/(\{.*\})/);
+                  if (match) {
+                    const data = JSON.parse(match[1]);
+                    
+                    // Extract content if available
+                    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                      const text = data.candidates[0].content.parts[0].text;
+                      fullResponse += text;
+                      onChunk(text);
+                      foundValidContent = true;
+                      console.log(`Found valid content in JSON: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                    }
+                  }
+                } catch (e) {
+                  // Expected for partial chunks, continue
+                }
+              }
+              
+              // Second try: if no valid JSON objects found, try regex extraction
+              if (!foundValidContent) {
+                // Extract any text fields from the buffer
+                const textMatches = buffer.match(/"text"\s*:\s*"([^"]*?)"/g);
+                if (textMatches) {
+                  for (const match of textMatches) {
+                    try {
+                      const text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      if (text) {
+                        fullResponse += text;
+                        onChunk(text);
+                        foundValidContent = true;
+                        console.log(`Found content via regex: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                      }
+                    } catch (e) {
+                      // Ignore extraction errors
+                    }
+                  }
+                }
+              }
+              
+              // Third try: if still no content, look for any text between quotes after "text":
+              if (!foundValidContent) {
+                const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
+                if (directTextMatch && directTextMatch[1]) {
+                  const text = directTextMatch[1];
+                  fullResponse += text;
+                  onChunk(text);
+                  foundValidContent = true;
+                  console.log(`Extracted direct text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                }
+              }
+              
+              // Fourth try: desperate attempt to find any text content
+              if (!foundValidContent && buffer.includes('"text"')) {
+                try {
+                  // Get everything after "text":
+                  const textSection = buffer.split('"text":')[1];
+                  if (textSection) {
+                    // Try to extract the content between the first set of quotes
+                    const quoteMatch = textSection.match(/"([^"]*)"/);
+                    if (quoteMatch && quoteMatch[1]) {
+                      const text = quoteMatch[1];
+                      fullResponse += text;
+                      onChunk(text);
+                      foundValidContent = true;
+                      console.log(`Last resort text extraction: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Failed in emergency text extraction:", e);
+                }
+              }
+              
+              if (!foundValidContent) {
+                console.warn("No valid content found in buffer");
+              }
+              
+              return foundValidContent;
+            };
+            
+            // Function to clean buffer by removing processed data
+            const cleanBuffer = (buffer: string): string => {
+              // Look for complete JSON objects and remove them
+              const jsonObjectsRegex = /\{[^{]*?\}\n?/g;
+              const matches = buffer.match(jsonObjectsRegex);
+              
+              if (matches) {
+                // Remove all complete objects from buffer
+                let newBuffer = buffer;
+                for (const match of matches) {
+                  newBuffer = newBuffer.replace(match, '');
+                }
+                return newBuffer;
+              }
+              
+              // If buffer is getting too large, clear it to prevent memory issues
+              if (buffer.length > 10000) {
+                console.warn("Buffer too large, clearing");
+                return "";
+              }
+              
+              return buffer;
             };
 
             // Start reading the stream
@@ -603,95 +732,247 @@ Priority: [Priority level]
           ]
         });
 
+        // Make sure the URL includes the proper stream endpoint
+        if (!requestUrl.includes(':streamGenerateContent')) {
+          // Replace the generateContent with streamGenerateContent
+          requestUrl = requestUrl.replace(":generateContent", ":streamGenerateContent");
+          
+          if (!requestUrl.includes(':streamGenerateContent')) {
+            // If the URL doesn't have streamGenerateContent, add it
+            if (requestUrl.includes('/models/')) {
+              // Extract the model name and construct the correct URL
+              const modelMatch = requestUrl.match(/\/models\/([^\/]+)/);
+              if (modelMatch && modelMatch[1]) {
+                const modelName = modelMatch[1];
+                // Reconstruct the URL with the streaming endpoint
+                if (requestUrl.endsWith(modelName)) {
+                  requestUrl += ':streamGenerateContent';
+                } else {
+                  // For URLs that might have additional path components
+                  const baseUrl = requestUrl.split('/models/')[0];
+                  requestUrl = `${baseUrl}/models/${modelName}:streamGenerateContent`;
+                }
+              } else {
+                requestUrl += ':streamGenerateContent';
+              }
+            } else {
+              // If no model is specified, use gemini-pro as default
+              requestUrl = requestUrl.endsWith('/')
+                ? `${requestUrl}v1beta/models/gemini-pro:streamGenerateContent`
+                : `${requestUrl}/v1beta/models/gemini-pro:streamGenerateContent`;
+              console.warn("Gemini model not found in URL, assuming 'gemini-pro'");
+            }
+          }
+        }
+
+        console.log(`Using Gemini streaming URL: ${requestUrl}`);
+
         fetch(requestUrl, {
           method: 'POST',
           headers: headers,
           body: requestBody,
           signal: abortController?.signal
         })
-          .then(async response => {
+          .then(response => {
             // Check if aborted
             if (abortController?.signal.aborted) {
               throw new Error('Request aborted');
             }
 
-            const contentType = response.headers.get('content-type');
             if (!response.ok) {
-              console.error(`Gemini API error: ${response.status} ${response.statusText}`);
-              const errorText = await response.text();
-              console.error(`Gemini API error details: ${errorText}`);
-              throw new Error(`Gemini API request failed: ${response.status} ${response.statusText} - ${errorText}`);
+              // Try to get more detailed error information
+              return response.text().then(errorText => {
+                console.error(`Gemini API error response (${response.status}):`, errorText);
+                try {
+                  // Try to parse as JSON for structured error information
+                  const errorJson = JSON.parse(errorText);
+                  if (errorJson.error && errorJson.error.message) {
+                    throw new Error(`Gemini API error (${response.status}): ${errorJson.error.message}`);
+                  }
+                } catch (parseError) {
+                  // If parsing fails, use the raw error text
+                }
+                throw new Error(`Gemini API request failed with status ${response.status}: ${response.statusText}. ${errorText}`);
+              });
             }
             
-            if (contentType && contentType.includes('application/json')) {
-              return response.json();
-            } else {
-              const text = await response.text();
-              console.warn('Gemini API returned non-JSON response:', text);
-              try {
-                return JSON.parse(text);
-              } catch (e) {
-                throw new Error(`Gemini API returned invalid JSON: ${text}`);
-              }
-            }
-          })
-          .then(data => {
-            // Check if aborted before processing response
-            if (abortController?.signal.aborted) {
-              throw new Error('Request aborted');
+            if (!response.body) {
+              throw new Error("ReadableStream not supported in this browser.");
             }
 
-            console.log('Gemini API response received');
+            console.log('Gemini streaming response initiated');
             
-            if (data.error) {
-              throw new Error(`Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
-            }
-            
-            // Extract content from Gemini response
-            const content = data.candidates?.[0]?.content?.parts?.[0]?.text || 
-                           data.candidates?.[0]?.text || 
-                           data.text || 
-                           data.content?.parts?.[0]?.text || 
-                           JSON.stringify(data);
-            
-            console.log(`Gemini returned content length: ${content.length} chars. Beginning streaming simulation...`);
-            
-            if (!content || content.length === 0) {
-              console.warn('No content to stream from Gemini response');
-              onComplete('');
-              return;
-            }
+            // Set up the stream reader for Gemini
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
 
-            // Simulate streaming with abort support
-            let chunkIndex = 0;
-            const chunks = content.match(/[^\.!?]+[\.!?]+/g) || [content];
-            
-            const streamInterval = setInterval(() => {
+            // Process the stream
+            const processStream = ({ done, value }: ReadableStreamReadResult<Uint8Array>): Promise<void> => {
               // Check if aborted
               if (abortController?.signal.aborted) {
-                clearInterval(streamInterval);
-                return;
+                reader.cancel(); // Cancel the reader
+                throw new Error('Request aborted');
               }
 
-              if (chunkIndex < chunks.length) {
-                const chunk = chunks[chunkIndex++];
-                fullResponse += chunk;
-                onChunk(chunk);
-              } else {
-                clearInterval(streamInterval);
+              if (done) {
+                // Process any remaining buffer data before completing
+                if (partialJsonBuffer) {
+                  try {
+                    processBufferedData(partialJsonBuffer);
+                  } catch (e) {
+                    console.warn('Error processing final buffer data:', e);
+                  }
+                }
+                
+                // Stream complete, call the complete callback
                 onComplete(fullResponse);
+                return Promise.resolve();
               }
-            }, 50);
 
-            // Add abort listener to clear interval
-            abortController?.signal.addEventListener('abort', () => {
-              clearInterval(streamInterval);
-            });
+              // Decode the chunk and process
+              const chunk = decoder.decode(value, { stream: true });
+              
+              // Add to buffer and process
+              partialJsonBuffer += chunk;
+              
+              try {
+                // Process any complete JSON objects
+                processBufferedData(partialJsonBuffer);
+                
+                // Keep any incomplete data in the buffer
+                partialJsonBuffer = cleanBuffer(partialJsonBuffer);
+              } catch (error) {
+                console.warn('Error processing Gemini stream data:', error);
+              }
+
+              // Continue reading the stream
+              return reader.read().then(processStream);
+            };
+
+            // Function to process buffered data and extract JSON objects
+            const processBufferedData = (buffer: string) => {
+              // Log raw buffer for debugging
+              console.debug("Processing buffer:", buffer.substring(0, 100) + (buffer.length > 100 ? "..." : ""));
+              
+              let foundValidContent = false;
+              
+              // First try: process as line-delimited JSON objects
+              const lines = buffer.split('\n');
+              for (const line of lines) {
+                if (!line.trim()) continue;
+                
+                try {
+                  // Try to find a valid JSON object in the line
+                  const match = line.match(/(\{.*\})/);
+                  if (match) {
+                    const data = JSON.parse(match[1]);
+                    
+                    // Extract content if available
+                    if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
+                      const text = data.candidates[0].content.parts[0].text;
+                      fullResponse += text;
+                      onChunk(text);
+                      foundValidContent = true;
+                      console.log(`Found valid content in JSON: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                    }
+                  }
+                } catch (e) {
+                  // Expected for partial chunks, continue
+                }
+              }
+              
+              // Second try: if no valid JSON objects found, try regex extraction
+              if (!foundValidContent) {
+                // Extract any text fields from the buffer
+                const textMatches = buffer.match(/"text"\s*:\s*"([^"]*?)"/g);
+                if (textMatches) {
+                  for (const match of textMatches) {
+                    try {
+                      const text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      if (text) {
+                        fullResponse += text;
+                        onChunk(text);
+                        foundValidContent = true;
+                        console.log(`Found content via regex: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                      }
+                    } catch (e) {
+                      // Ignore extraction errors
+                    }
+                  }
+                }
+              }
+              
+              // Third try: if still no content, look for any text between quotes after "text":
+              if (!foundValidContent) {
+                const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
+                if (directTextMatch && directTextMatch[1]) {
+                  const text = directTextMatch[1];
+                  fullResponse += text;
+                  onChunk(text);
+                  foundValidContent = true;
+                  console.log(`Extracted direct text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                }
+              }
+              
+              // Fourth try: desperate attempt to find any text content
+              if (!foundValidContent && buffer.includes('"text"')) {
+                try {
+                  // Get everything after "text":
+                  const textSection = buffer.split('"text":')[1];
+                  if (textSection) {
+                    // Try to extract the content between the first set of quotes
+                    const quoteMatch = textSection.match(/"([^"]*)"/);
+                    if (quoteMatch && quoteMatch[1]) {
+                      const text = quoteMatch[1];
+                      fullResponse += text;
+                      onChunk(text);
+                      foundValidContent = true;
+                      console.log(`Last resort text extraction: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Failed in emergency text extraction:", e);
+                }
+              }
+              
+              if (!foundValidContent) {
+                console.warn("No valid content found in buffer");
+              }
+              
+              return foundValidContent;
+            };
+            
+            // Function to clean buffer by removing processed data
+            const cleanBuffer = (buffer: string): string => {
+              // Look for complete JSON objects and remove them
+              const jsonObjectsRegex = /\{[^{]*?\}\n?/g;
+              const matches = buffer.match(jsonObjectsRegex);
+              
+              if (matches) {
+                // Remove all complete objects from buffer
+                let newBuffer = buffer;
+                for (const match of matches) {
+                  newBuffer = newBuffer.replace(match, '');
+                }
+                return newBuffer;
+              }
+              
+              // If buffer is getting too large, clear it to prevent memory issues
+              if (buffer.length > 10000) {
+                console.warn("Buffer too large, clearing");
+                return "";
+              }
+              
+              return buffer;
+            };
+
+            // Start reading the stream
+            return reader.read().then(processStream);
           })
           .catch(error => {
             // Only call onError if it wasn't aborted
             if (!abortController?.signal.aborted || error.message !== 'Request aborted') {
-              console.error('Error in Gemini API request:', error);
+              console.error('Error in Gemini API streaming request:', error);
               onError(error);
             }
           });
@@ -775,6 +1056,88 @@ Priority: [Priority level]
     } catch (error) {
       console.error("Failed to extract JSON from response:", error);
       return null;
+    }
+  }
+
+  /**
+   * Streams a chat conversation to the LLM API and provides chunks via callback
+   */
+  static streamChatToLlm(
+    config: LlmConfig,
+    prompt: string,
+    language: string,
+    onChunk: StreamChunkCallback,
+    onComplete: StreamCompleteCallback,
+    onError: StreamErrorCallback,
+    abortController?: AbortController,
+    messageHistory: ChatMessage[] = []
+  ): void {
+    if (!config) {
+      onError(new Error('No LLM configuration available'));
+      return;
+    }
+
+    // Add language instruction to system message if we don't have history
+    let updatedHistory = [...messageHistory];
+    
+    // Check if we need to add a system message with language instruction
+    const hasSystemMessage = messageHistory.some(msg => msg.role === 'system');
+    if (!hasSystemMessage) {
+      const languageInstruction = `Please provide your response in ${language} language.`;
+      updatedHistory.unshift({
+        role: 'system',
+        content: languageInstruction
+      });
+    }
+
+    // Add the user prompt if not already in history
+    const lastMessageIsUser = messageHistory.length > 0 && 
+                             messageHistory[messageHistory.length - 1].role === 'user';
+    
+    if (!lastMessageIsUser) {
+      updatedHistory.push({
+        role: 'user',
+        content: prompt
+      });
+    }
+
+    // Track whether we're using Gemini (which sends incremental chunks)
+    // vs OpenAI/Azure OpenAI (which sends full accumulated content each time)
+    const isGemini = config.provider === 'gemini';
+    let accumulatedResponse = '';
+    
+    // Define custom chunk handler based on provider
+    const chunkHandler: StreamChunkCallback = (chunk) => {
+      if (isGemini) {
+        // For Gemini, we get incremental chunks
+        accumulatedResponse += chunk;
+        onChunk(chunk);
+      } else {
+        // For OpenAI/Azure OpenAI, we get the full accumulated content each time
+        // The streaming service takes care of accumulating, so just pass through
+        onChunk(chunk);
+      }
+    };
+    
+    // Define custom complete handler
+    const completeHandler: StreamCompleteCallback = (finalContent) => {
+      // Make sure we pass the final accumulated content
+      onComplete(isGemini ? accumulatedResponse : finalContent);
+    };
+
+    // Stream the response
+    try {
+      this.streamPromptToLlm(
+        config,
+        '', // Empty prompt as we're using message history
+        chunkHandler,
+        completeHandler,
+        onError,
+        abortController,
+        updatedHistory
+      );
+    } catch (error) {
+      onError(error instanceof Error ? error : new Error('Unknown error occurred'));
     }
   }
 } 
