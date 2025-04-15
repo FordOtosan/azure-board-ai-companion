@@ -1,6 +1,9 @@
 import { ContentCopy } from '@mui/icons-material';
 import { Box, IconButton, Paper, Tooltip, Typography, useTheme } from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
+import remarkGfm from 'remark-gfm';
 import { Language } from '../../../translations';
 import '../styles/aiBot.css';
 import { AiBotMessage } from './AiBotChat';
@@ -26,25 +29,14 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
-  const [showCursor, setShowCursor] = useState(true);
-  const theme = useTheme();
   
+  const theme = useTheme();
   const T = messagesTranslations[currentLanguage];
   
-  // Scroll to bottom when messages change
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
-  
-  // Blink cursor for streaming messages
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setShowCursor(prev => !prev);
-    }, 500);
-    
-    return () => clearInterval(interval);
-  }, []);
-  
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -59,92 +51,6 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
     }
   };
 
-  // Function to format code blocks and markdown-like content
-  const formatMessage = (content: string, isStreaming: boolean = false) => {
-    // Handle empty content
-    if (!content || content.trim() === '') {
-      return <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{'   '}</Typography>;
-    }
-    
-    // For streaming content, use a simpler approach to avoid re-parsing complex content on each update
-    if (isStreaming) {
-      return (
-        <Typography 
-          variant="body1" 
-          sx={{ 
-            whiteSpace: 'pre-wrap',
-            '& code': {
-              fontFamily: 'monospace',
-              backgroundColor: theme.palette.grey[100],
-              padding: '0.2rem 0.4rem',
-              borderRadius: '3px',
-              fontSize: '0.9em'
-            }
-          }}
-        >
-          {content}
-        </Typography>
-      );
-    }
-    
-    // Check if content is JSON, if so, format it nicely
-    if (content.trim().startsWith('{') && content.trim().endsWith('}')) {
-      try {
-        const jsonData = JSON.parse(content);
-        return (
-          <Box 
-            component="pre" 
-            sx={{ 
-              backgroundColor: theme.palette.grey[100],
-              p: 1.5,
-              borderRadius: 1,
-              overflowX: 'auto',
-              fontSize: '0.875rem',
-              fontFamily: 'monospace',
-              whiteSpace: 'pre-wrap',
-              my: 1
-            }}
-          >
-            {JSON.stringify(jsonData, null, 2)}
-          </Box>
-        );
-      } catch (e) {
-        // Not valid JSON, continue with normal formatting
-      }
-    }
-    
-    // Simple function to format code blocks
-    return content
-      .split('```')
-      .map((segment, index) => {
-        // Even indices are regular text, odd indices are code blocks
-        if (index % 2 === 0) {
-          return <Typography key={index} variant="body1" sx={{ whiteSpace: 'pre-wrap' }}>{segment}</Typography>;
-        } else {
-          // Code block
-          return (
-            <Box 
-              key={index} 
-              component="pre" 
-              sx={{ 
-                backgroundColor: theme.palette.grey[100],
-                p: 1.5,
-                borderRadius: 1,
-                overflowX: 'auto',
-                fontSize: '0.875rem',
-                fontFamily: 'monospace',
-                my: 1
-              }}
-            >
-              <Box component="code" sx={{ whiteSpace: 'pre' }}>
-                {segment}
-              </Box>
-            </Box>
-          );
-        }
-      });
-  };
-  
   return (
     <Box 
       sx={{ 
@@ -156,6 +62,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         flexDirection: 'column',
         height: '100%',
         minHeight: 0,
+        position: 'relative',
         '&::-webkit-scrollbar': {
           width: '8px',
         },
@@ -165,71 +72,136 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         '&::-webkit-scrollbar-thumb': {
           background: theme => theme.palette.grey[300],
           borderRadius: '4px',
-        },
+        }
       }}
       className="aiBot-messages"
       ref={messagesContainerRef}
     >
-      {messages.map((msg) => (
-        <Paper
-          key={msg.id}
-          elevation={0}
-          sx={{
-            p: 2,
-            mb: 2,
-            maxWidth: '90%',
-            borderRadius: 2,
-            position: 'relative',
-            alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-            backgroundColor: msg.role === 'user' 
-              ? theme.palette.primary.light 
-              : theme.palette.grey[100],
-            color: msg.role === 'user'
-              ? theme.palette.primary.contrastText
-              : 'inherit',
-          }}
-          className="aiBot-message"
-        >
-          {/* Message content */}
-          <Box sx={{ wordBreak: 'break-word' }}>
-            {msg.role === 'assistant' ? (
-              <>
-                {formatMessage(msg.content, msg.isStreaming)}
-                {msg.isStreaming && showCursor && (
-                  <Typography component="span" sx={{ animation: 'blink 1s infinite' }}>▌</Typography>
+      {/* Use a message IDs map to deduplicate messages */}
+      {messages
+        .filter((msg, index, self) => {
+          // Only keep the first occurrence of each message ID
+          return self.findIndex(m => m.id === msg.id) === index;
+        })
+        .map((msg) => (
+          <Box key={msg.id} sx={{ 
+            position: 'relative', 
+            mb: 2, 
+            display: 'flex', 
+            alignItems: 'flex-end',
+            flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' 
+          }}>
+            <Paper
+              elevation={0}
+              sx={{
+                p: 2,
+                maxWidth: '90%',
+                borderRadius: 2,
+                position: 'relative',
+                backgroundColor: msg.role === 'user' 
+                  ? theme.palette.primary.light 
+                  : theme.palette.grey[100],
+                color: msg.role === 'user'
+                  ? theme.palette.primary.contrastText
+                  : 'inherit',
+              }}
+              className="aiBot-message"
+            >
+              <Box sx={{ 
+                wordBreak: 'break-word',
+                whiteSpace: 'pre-line',
+                '& .markdown-body': {
+                  backgroundColor: 'transparent',
+                  color: 'inherit'
+                }
+              }}>
+                {msg.role === 'assistant' ? (
+                  <Box sx={{
+                    '& pre': {
+                      backgroundColor: theme.palette.grey[50],
+                      padding: theme.spacing(1),
+                      borderRadius: theme.spacing(1),
+                      overflow: 'auto',
+                    },
+                    '& code': {
+                      backgroundColor: theme.palette.grey[200],
+                      padding: '2px 4px',
+                      borderRadius: '4px',
+                      fontSize: '0.875em',
+                      color: theme.palette.text.primary
+                    },
+                    '& p': {
+                      margin: '0.5em 0',
+                      whiteSpace: 'pre-line',
+                      '&:first-of-type': { marginTop: 0 },
+                      '&:last-child': { marginBottom: 0 }
+                    },
+                    '& ul, & ol': {
+                      marginTop: '0.5em',
+                      marginBottom: '0.5em',
+                      paddingLeft: '1.5em',
+                    }
+                  }}>
+                    <ReactMarkdown 
+                      remarkPlugins={[remarkGfm, remarkBreaks]}
+                      components={{
+                        p: ({children}) => (
+                          <Typography 
+                            component="p" 
+                            variant="body1" 
+                            sx={{ 
+                              whiteSpace: 'pre-line',
+                              my: 1
+                            }}
+                          >
+                            {children}
+                          </Typography>
+                        ),
+                        br: () => <br />
+                      }}
+                    >
+                      {msg.content.replace(/\\n/g, '\n')}
+                    </ReactMarkdown>
+                  </Box>
+                ) : (
+                  <Typography 
+                    variant="body1" 
+                    sx={{ whiteSpace: 'pre-line' }}
+                  >
+                    {msg.content.replace(/\\n/g, '\n')}
+                  </Typography>
                 )}
-              </>
-            ) : (
-              <Typography variant="body1">{msg.content}</Typography>
+              </Box>
+            </Paper>
+            
+            {/* Copy button - only for assistant messages */}
+            {msg.content && !msg.isStreaming && msg.role === 'assistant' && (
+              <Box sx={{ 
+                display: 'flex',
+                alignItems: 'center',
+                mx: 1,
+              }}>
+                <Tooltip title={copiedId === msg.id ? T.copied : T.copy}>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleCopy(msg.content, msg.id)}
+                    sx={{
+                      opacity: 0.6,
+                      color: theme.palette.text.secondary,
+                      '&:hover': {
+                        opacity: 1,
+                      },
+                    }}
+                  >
+                    <ContentCopy fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
             )}
           </Box>
-          
-          {/* Copy button */}
-          {msg.content && !msg.isStreaming && (
-            <IconButton
-              size="small"
-              sx={{
-                position: 'absolute',
-                top: 8,
-                right: 8,
-                opacity: 0.6,
-                color: msg.role === 'user' ? 'inherit' : undefined,
-                '&:hover': {
-                  opacity: 1,
-                },
-              }}
-              onClick={() => handleCopy(msg.content, msg.id)}
-            >
-              <Tooltip title={copiedId === msg.id ? T.copied : T.copy}>
-                <ContentCopy fontSize="small" />
-              </Tooltip>
-            </IconButton>
-          )}
-        </Paper>
-      ))}
+        ))}
       
-      {/* Ref for auto-scrolling */}
       <div ref={messagesEndRef} />
     </Box>
   );
-}; 
+};

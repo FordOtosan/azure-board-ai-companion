@@ -1,15 +1,15 @@
 import {
-    Send,
-    Stop
+  Send,
+  Stop
 } from '@mui/icons-material';
 import {
-    Box,
-    IconButton,
-    Paper,
-    TextField,
-    Tooltip,
+  Box,
+  IconButton,
+  Paper,
+  TextField,
+  Tooltip,
 } from '@mui/material';
-import React, { KeyboardEvent, useState } from 'react';
+import React, { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { LlmConfig } from '../../../features/settings/services/LlmSettingsService';
 import { Language } from '../../../translations';
 import '../styles/aiBot.css';
@@ -40,6 +40,9 @@ const inputTranslations = {
   }
 };
 
+// How long to wait before auto-resetting stuck states
+const AUTO_RESET_TIMEOUT = 30000; // 30 seconds
+
 export const AiBotInput: React.FC<AiBotInputProps> = ({
   isLoading,
   currentLanguage,
@@ -48,10 +51,48 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
   onStopGeneration,
 }) => {
   const [message, setMessage] = useState('');
+  const [inputDisabled, setInputDisabled] = useState(false);
+  // Use internal loading state as a fallback
+  const [internalIsLoading, setInternalIsLoading] = useState(isLoading);
+  const isLoadingRef = useRef(isLoading);
+  const loadingTimerRef = useRef<number | null>(null);
   const T = inputTranslations[currentLanguage];
 
+  // Update input disabled state when isLoading changes
+  useEffect(() => {
+    console.log("isLoading changed:", isLoading);
+    isLoadingRef.current = isLoading;
+    setInternalIsLoading(isLoading);
+    setInputDisabled(isLoading || !currentLlm);
+    
+    // Clear any existing timer
+    if (loadingTimerRef.current) {
+      window.clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
+    }
+    
+    // If we're setting loading to true, create a safety timeout
+    // to auto-reset in case the completion callback never fires
+    if (isLoading) {
+      loadingTimerRef.current = window.setTimeout(() => {
+        console.log("Safety timeout: Auto-resetting loading state after 30 seconds");
+        setInternalIsLoading(false);
+        setInputDisabled(!currentLlm);
+      }, AUTO_RESET_TIMEOUT);
+    }
+  }, [isLoading, currentLlm]);
+  
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (loadingTimerRef.current) {
+        window.clearTimeout(loadingTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleSend = () => {
-    if (message.trim() && !isLoading) {
+    if (message.trim() && !isLoadingRef.current) {
       onSendMessage(message);
       setMessage('');
     }
@@ -66,6 +107,11 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
 
   const handleStop = () => {
     onStopGeneration();
+    // Force reset loading state immediately on manual stop
+    setTimeout(() => {
+      setInternalIsLoading(false);
+      setInputDisabled(!currentLlm);
+    }, 500); // Small delay to allow the stop propagation
   };
 
   const getPlaceholderText = () => {
@@ -74,6 +120,9 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
     }
     return T.typeMessage;
   };
+
+  // Use the internal state as fallback if the parent state gets stuck
+  const effectiveIsLoading = isLoading && internalIsLoading;
 
   return (
     <Paper
@@ -92,7 +141,7 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
       <Box
         sx={{
           display: 'flex',
-          alignItems: 'flex-end',
+          alignItems: 'center',
           gap: 1
         }}
       >
@@ -105,7 +154,7 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
           onChange={(e) => setMessage(e.target.value)}
           onKeyDown={handleKeyPress}
           placeholder={getPlaceholderText()}
-          disabled={isLoading || !currentLlm}
+          disabled={inputDisabled}
           sx={{
             '& .MuiOutlinedInput-root': {
               borderRadius: 2,
@@ -113,14 +162,24 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
           }}
         />
         
-        <Tooltip title={isLoading ? T.stopGeneration : T.sendMessage}>
-          <IconButton
-            color={isLoading ? "error" : "primary"}
-            onClick={isLoading ? handleStop : handleSend}
-            disabled={(!message.trim() && !isLoading) || (!isLoading && !currentLlm)}
-          >
-            {isLoading ? <Stop /> : <Send />}
-          </IconButton>
+        <Tooltip title={effectiveIsLoading ? T.stopGeneration : T.sendMessage}>
+          <span>
+            <IconButton
+              color={effectiveIsLoading ? "error" : "primary"}
+              onClick={effectiveIsLoading ? handleStop : handleSend}
+              disabled={(!message.trim() && !effectiveIsLoading) || (!effectiveIsLoading && !currentLlm)}
+              sx={{
+                height: 56,
+                width: 56,
+                '& .MuiSvgIcon-root': {
+                  fontSize: 28
+                }
+              }}
+              data-testid={effectiveIsLoading ? "stop-button" : "send-button"}
+            >
+              {effectiveIsLoading ? <Stop color="error" /> : <Send />}
+            </IconButton>
+          </span>
         </Tooltip>
       </Box>
     </Paper>
