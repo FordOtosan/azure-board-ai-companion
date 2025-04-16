@@ -3,13 +3,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import { LlmConfig, LlmSettings } from '../../../features/settings/services/LlmSettingsService';
 import {
     ChatMessage,
-    LlmApiService,
     StreamCompleteCallback,
     StreamErrorCallback
 } from '../../../services/api/LlmApiService';
 import { Language, translations } from '../../../translations';
+import { AiBotLlmApiService } from '../services/AiBotLlmApiService';
 import { AiBotInput } from './AiBotInput';
 import { AiBotMessages } from './AiBotMessages';
+import { AiBotWorkItemInfo } from './AiBotWorkItemInfo';
 
 // Define message type for the AI Bot chat
 export interface AiBotMessage {
@@ -216,7 +217,7 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
         handleStreamError(error);
       };
       
-      await LlmApiService.streamChatToLlm(
+      await AiBotLlmApiService.streamChatToLlm(
         currentLlm,
         prompt,
         currentLanguage,
@@ -340,6 +341,9 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
         position: 'relative'
       }}
     >
+      {/* Work Item Info at the top */}
+      <AiBotWorkItemInfo />
+      
       <AiBotMessages 
         messages={messages} 
         currentLanguage={currentLanguage}
