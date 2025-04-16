@@ -26,7 +26,11 @@ export const AiBotWorkItemCard: React.FC<AiBotWorkItemCardProps> = ({
     description,
     acceptanceCriteria,
     storyPoints,
-    priority
+    priority,
+    effort,
+    originalEstimate,
+    remainingWork,
+    completedWork
   } = AiBotWorkItemService.getWorkItemDetails(workItem);
   
   // Get background color based on work item type
@@ -123,7 +127,7 @@ export const AiBotWorkItemCard: React.FC<AiBotWorkItemCardProps> = ({
             )}
           </Stack>
           
-          {!compact && description && (
+          {description && (
             <>
               <Divider sx={{ my: 1 }} />
               <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
@@ -131,13 +135,44 @@ export const AiBotWorkItemCard: React.FC<AiBotWorkItemCardProps> = ({
               </Typography>
               <Typography variant="body2" sx={{ 
                 '& div': { 
-                  maxHeight: '150px', 
+                  maxHeight: compact ? '75px' : '150px', 
                   overflow: 'auto',
                   '& img': { maxWidth: '100%' }
                 } 
               }}>
                 {renderHtml(description)}
               </Typography>
+            </>
+          )}
+          
+          {!compact && (effort !== null || originalEstimate !== null || remainingWork !== null || completedWork !== null) && (
+            <>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+                Estimates
+              </Typography>
+              <Stack direction="row" spacing={2} flexWrap="wrap">
+                {effort !== null && (
+                  <Typography variant="body2">
+                    <strong>Effort:</strong> {effort}
+                  </Typography>
+                )}
+                {originalEstimate !== null && (
+                  <Typography variant="body2">
+                    <strong>Original Estimate:</strong> {originalEstimate}
+                  </Typography>
+                )}
+                {remainingWork !== null && (
+                  <Typography variant="body2">
+                    <strong>Remaining:</strong> {remainingWork}
+                  </Typography>
+                )}
+                {completedWork !== null && (
+                  <Typography variant="body2">
+                    <strong>Completed:</strong> {completedWork}
+                  </Typography>
+                )}
+              </Stack>
             </>
           )}
           

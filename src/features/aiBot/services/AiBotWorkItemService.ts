@@ -100,95 +100,205 @@ export class AiBotWorkItemService {
   }
 
   /**
-   * Get a work item directly via REST API
+   * Get the work item using the REST API
+   * This is needed because the WorkItemFormService does not include relations
+   * @param id
+   * @returns
    */
   private static async getWorkItemViaRestApi(id: number): Promise<WorkItem | null> {
     try {
-      // Initialize context first
-      await this.initializeContext();
+      // Log that we're starting the REST API call
+      this.log(LogLevel.INFO, `Fetching work item ${id} via REST API...`);
       
-      if (this.workItemCache.has(id)) {
-        this.log(LogLevel.DEBUG, `Returning cached work item ${id}`);
-        return this.workItemCache.get(id) as WorkItem;
-      }
-      
-      const startTime = Date.now();
-      
-      // Using the REST API directly with fallback values if context initialization failed
-      const org = this.organization || 'mehmetalierol0970';
-      const project = this.project || 'PartsUnlimited';
-      const apiUrl = `https://dev.azure.com/${org}/${project}/_apis/wit/workItems/${id}?$expand=relations&api-version=7.1`;
-      
-      // Get access token from SDK
-      const accessToken = await SDK.getAccessToken();
-      
-      // Define request options
-      const options = {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      };
-      
-      // Log the request details
-      this.logHttpRequest('GET', apiUrl, options, startTime);
-      
-      const fetchPromise = fetch(apiUrl, options);
-      
-      const response = await Promise.race([
-        fetchPromise,
-        createTimeoutPromise<Response>(API_TIMEOUT)
-      ]);
-      
-      if (!response.ok) {
-        // Log the error response
-        this.logHttpResponse('GET', apiUrl, response, startTime);
-        
-        this.log(LogLevel.WARN, `API returned ${response.status} for work item ${id}`, {
-          status: response.status,
-          statusText: response.statusText,
-          url: apiUrl
-        });
+      // Fail fast if we don't have an ID
+      if (!id) {
+        this.log(LogLevel.ERROR, 'Cannot fetch work item: ID is undefined or zero');
         return null;
       }
       
-      const data = await response.json();
+      // Check if we have our context variables
+      if (!this.organization || !this.project) {
+        this.log(LogLevel.WARN, 'Organization or project not set, attempting to fetch work item anyway', {
+          organization: this.organization || 'undefined',
+          project: this.project || 'undefined'
+        });
+      }
       
-      // Log the successful response
-      this.logHttpResponse('GET', apiUrl, response, startTime, {
-        id: data.id,
-        rev: data.rev,
-        fieldCount: Object.keys(data.fields || {}).length,
-        relationCount: (data.relations || []).length,
-        title: data.fields?.['System.Title'],
-        type: data.fields?.['System.WorkItemType']
-      });
+      // Fields we want to get
+      const fields = [
+        "System.Id", 
+        "System.WorkItemType", 
+        "System.Title", 
+        "System.AssignedTo", 
+        "System.State", 
+        "System.Description",
+        "Microsoft.VSTS.Common.AcceptanceCriteria",
+        "Microsoft.VSTS.Common.Priority",
+        "Microsoft.VSTS.Scheduling.StoryPoints",
+        "System.Tags",
+        "System.AreaPath",
+        "System.IterationPath",
+        "System.CreatedBy",
+        "System.CreatedDate",
+        "System.ChangedDate"
+      ];
       
-      // Convert the REST API format to WorkItem format
-      const workItem: WorkItem = {
-        id: data.id,
-        rev: data.rev,
-        fields: data.fields,
-        url: data.url,
-        _links: data._links,
-        relations: data.relations || [],
-        commentVersionRef: {
-          commentId: 0,
-          version: 0,
-          createdInRevision: 0,
-          isDeleted: false,
-          text: "",
-          url: ""
-        } as WorkItemCommentVersionRef
-      };
+      // Get the access token
+      let accessToken;
+      try {
+        accessToken = await SDK.getAccessToken();
+      } catch (tokenError) {
+        this.log(LogLevel.ERROR, 'Failed to get access token for REST API call', tokenError);
+        throw new Error(`Authentication failed: Could not get access token - ${tokenError instanceof Error ? tokenError.message : String(tokenError)}`);
+      }
       
-      // Cache the work item
-      this.workItemCache.set(id, workItem);
+      if (!accessToken) {
+        this.log(LogLevel.ERROR, 'Access token is empty or undefined');
+        throw new Error('Authentication failed: Access token is empty or undefined');
+      }
+
+      // STEP 1: First get the work item fields
+      const fieldsApiUrl = `https://dev.azure.com/${this.organization || 'mehmetalierol0970'}/${this.project || 'PartsUnlimited'}/_apis/wit/workItems/${id}?api-version=7.1&fields=${fields.join(",")}`;
       
-      return workItem;
-    } catch (error) {
-      this.log(LogLevel.ERROR, `Error fetching work item ${id} via REST API`, error);
+      this.log(LogLevel.DEBUG, `Fields API URL: ${fieldsApiUrl}`);
+      
+      // Make the fetch request for fields
+      let fieldsResponse;
+      try {
+        this.log(LogLevel.DEBUG, 'Making REST API call for fields with authorization token');
+        
+        fieldsResponse = await fetch(fieldsApiUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (fetchError) {
+        this.log(LogLevel.ERROR, 'Network error during fields REST API call', fetchError);
+        throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : String(fetchError)}`);
+      }
+      
+      // Check if the response was successful
+      if (!fieldsResponse.ok) {
+        const status = fieldsResponse.status;
+        let errorDetails = '';
+        
+        try {
+          // Try to get detailed error information
+          const errorText = await fieldsResponse.text();
+          errorDetails = errorText;
+          
+          // If it's JSON, parse it for better details
+          try {
+            const errorJson = JSON.parse(errorText);
+            if (errorJson.message) {
+              errorDetails = errorJson.message;
+            }
+          } catch (jsonError) {
+            // Not JSON, use the text as is
+          }
+        } catch (textError) {
+          // If we can't get the response text, just use the status
+          errorDetails = `Status ${status}`;
+        }
+        
+        // Log error based on status code
+        if (status === 401 || status === 403) {
+          this.log(LogLevel.ERROR, `Authentication or authorization error (${status}): ${errorDetails}`, {
+            status,
+            url: fieldsApiUrl
+          });
+          throw new Error(`Authentication failed with status ${status}: ${errorDetails}`);
+        } else if (status === 400) {
+          this.log(LogLevel.ERROR, `Bad request error (400): ${errorDetails}`, {
+            status,
+            url: fieldsApiUrl
+          });
+          throw new Error(`Bad request: ${errorDetails}`);
+        } else if (status === 404) {
+          this.log(LogLevel.ERROR, `Work item not found (404): Work item ID ${id} might not exist`, {
+            status,
+            url: fieldsApiUrl
+          });
+          throw new Error(`Work item ${id} not found`);
+        } else {
+          this.log(LogLevel.ERROR, `REST API request failed with status ${status}: ${errorDetails}`, {
+            status,
+            url: fieldsApiUrl
+          });
+          throw new Error(`REST API request failed with status ${status}: ${errorDetails}`);
+        }
+      }
+      
+      // Parse the fields response
+      let workItemData;
+      try {
+        workItemData = await fieldsResponse.json();
+      } catch (jsonError) {
+        this.log(LogLevel.ERROR, 'Failed to parse fields REST API response as JSON', jsonError);
+        throw new Error(`Failed to parse response: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
+      }
+
+      // STEP 2: Then get the work item relations
+      const relationsApiUrl = `https://dev.azure.com/${this.organization || 'mehmetalierol0970'}/${this.project || 'PartsUnlimited'}/_apis/wit/workItems/${id}?api-version=7.1&$expand=relations`;
+      
+      this.log(LogLevel.DEBUG, `Relations API URL: ${relationsApiUrl}`);
+      
+      // Make the fetch request for relations
+      let relationsResponse;
+      try {
+        this.log(LogLevel.DEBUG, 'Making REST API call for relations with authorization token');
+        
+        relationsResponse = await fetch(relationsApiUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      } catch (fetchError) {
+        this.log(LogLevel.ERROR, 'Network error during relations REST API call', fetchError);
+        // If we can't get relations, we'll just continue with the fields data
+        this.log(LogLevel.WARN, 'Failed to fetch relations, continuing with fields data only', fetchError);
+      }
+
+      // If we got a successful relations response, merge the relations into the work item data
+      if (relationsResponse && relationsResponse.ok) {
+        try {
+          const relationsData = await relationsResponse.json();
+          if (relationsData && relationsData.relations) {
+            workItemData.relations = relationsData.relations;
+            this.log(LogLevel.INFO, `Added ${relationsData.relations.length} relations to work item ${id}`);
+          }
+        } catch (relationsError) {
+          this.log(LogLevel.WARN, 'Failed to parse relations data, continuing with fields data only', relationsError);
+        }
+      } else if (relationsResponse) {
+        this.log(LogLevel.WARN, `Failed to fetch relations with status ${relationsResponse.status}, continuing with fields data only`);
+      }
+      
+      // Add some context information to the work item
+      if (workItemData) {
+        // Add project name
+        workItemData.projectName = this.project || 'Unknown Project';
+        
+        // Add work item type for easier access
+        if (workItemData.fields && workItemData.fields['System.WorkItemType']) {
+          workItemData.workItemType = workItemData.fields['System.WorkItemType'];
+        }
+        
+        this.log(LogLevel.INFO, `Successfully fetched work item ${id} with ${workItemData.relations ? workItemData.relations.length : 0} relations`);
+        return workItemData;
+      }
+      
+      this.log(LogLevel.WARN, `Received empty response when fetching work item ${id}`);
+      return null;
+    } catch (error: any) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.log(LogLevel.ERROR, `Error fetching work item ${id} via REST API: ${errorMessage}`, error);
+      
+      // Return null instead of throwing to enable fallback behavior
       return null;
     }
   }
@@ -214,7 +324,7 @@ export class AiBotWorkItemService {
       
       // After getting the ID, fetch the complete work item using REST API
       // This will include relations that we need for parent/child relationships
-      const fullWorkItem = await this.getWorkItemViaRestApi(id);
+      let fullWorkItem = await this.getWorkItemViaRestApi(id);
       
       if (fullWorkItem) {
         this.log(LogLevel.INFO, `Successfully fetched complete work item with relations for ID: ${id}`, {
@@ -230,7 +340,7 @@ export class AiBotWorkItemService {
       // If REST API fetch fails, fall back to form service for basic info
       this.log(LogLevel.WARN, `Could not fetch complete work item with REST API, falling back to form service for ID: ${id}`);
       
-      // Define fields to fetch
+      // Define fields to fetch - expand the list to include all important fields
       const fieldsToGet: string[] = [
         "System.Id",
         "System.Title",
@@ -243,17 +353,71 @@ export class AiBotWorkItemService {
         "Microsoft.VSTS.Scheduling.StoryPoints",
         "System.CreatedBy",
         "System.CreatedDate",
-        "System.ChangedDate"
+        "System.ChangedDate",
+        "Microsoft.VSTS.Scheduling.Effort",
+        "Microsoft.VSTS.Scheduling.RemainingWork",
+        "Microsoft.VSTS.Scheduling.OriginalEstimate",
+        "Microsoft.VSTS.Scheduling.CompletedWork",
+        "System.AreaPath",
+        "System.IterationPath"
       ];
       
       this.log(LogLevel.DEBUG, 'Requesting fields from current work item', fieldsToGet);
       
       // Get the fields
-      const fields = await workItemFormService.getFieldValues(fieldsToGet);
-      this.log(LogLevel.DEBUG, 'Retrieved field values', fields);
+      let fields;
+      try {
+        fields = await workItemFormService.getFieldValues(fieldsToGet);
+        this.log(LogLevel.DEBUG, 'Retrieved field values', fields);
+      } catch (fieldError) {
+        this.log(LogLevel.ERROR, `Error getting field values from form service`, fieldError);
+        
+        // Try a more minimal set of fields as a last resort
+        try {
+          const minimalFields = ["System.Id", "System.Title", "System.WorkItemType", "System.State"];
+          this.log(LogLevel.WARN, `Trying minimal set of fields as fallback`, minimalFields);
+          fields = await workItemFormService.getFieldValues(minimalFields);
+        } catch (minimalFieldError) {
+          this.log(LogLevel.ERROR, `Failed to get even minimal fields`, minimalFieldError);
+          // Create a very basic fields object with just the ID
+          fields = {
+            "System.Id": id,
+            "System.Title": `Work Item ${id}`,
+            "System.WorkItemType": "Unknown Type"
+          };
+        }
+      }
       
       // Get type and project from fields since the interface may not have these methods
-      const workItemType = fields["System.WorkItemType"] as string || "";
+      const workItemType = fields["System.WorkItemType"] as string || "Unknown Type";
+      
+      // Try to get additional data via REST API to enhance the fallback experience
+      try {
+        // Try the REST API again with a simpler URL (without expand and fewer fields)
+        const apiUrl = `https://dev.azure.com/${this.organization || 'mehmetalierol0970'}/${this.project || 'PartsUnlimited'}/_apis/wit/workItems/${id}?api-version=7.1`;
+        
+        const accessToken = await SDK.getAccessToken();
+        const response = await fetch(apiUrl, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          
+          // If we got data, enrich our fields with it
+          if (data && data.fields) {
+            this.log(LogLevel.INFO, `Successfully retrieved basic work item data from simplified REST API call`);
+            fields = { ...fields, ...data.fields };
+          }
+        }
+      } catch (restRetryError) {
+        this.log(LogLevel.WARN, `Simplified REST API call also failed`, restRetryError);
+        // Continue with what we have
+      }
       
       // Create a WorkItem-like object from the fields
       const workItem: ExtendedWorkItem = {
@@ -273,7 +437,7 @@ export class AiBotWorkItemService {
           url: ""
         } as WorkItemCommentVersionRef,
         // Add project info
-        projectName: "Current Project", // Default value
+        projectName: this.project || "Current Project", // Use project from context if available
         // Add type info
         workItemType: workItemType
       };
@@ -441,7 +605,7 @@ export class AiBotWorkItemService {
       const startTime = Date.now();
       
       // Get the work item with relations included
-      const apiUrl = `https://dev.azure.com/${this.organization}/${this.project}/_apis/wit/workItems/${workItemId}?$expand=relations&api-version=7.1`;
+      const apiUrl = `https://dev.azure.com/${this.organization}/${this.project}/_apis/wit/workItems/${workItemId}?$expand=relations&api-version=7.1&fields=System.Id,System.Title,System.State,System.AssignedTo,System.Description,System.WorkItemType,Microsoft.VSTS.Common.Priority,Microsoft.VSTS.Common.AcceptanceCriteria,Microsoft.VSTS.Scheduling.StoryPoints,System.CreatedBy,System.CreatedDate,System.ChangedDate,Microsoft.VSTS.Scheduling.Effort,Microsoft.VSTS.Scheduling.RemainingWork,Microsoft.VSTS.Scheduling.OriginalEstimate,Microsoft.VSTS.Scheduling.CompletedWork,System.AreaPath,System.IterationPath`;
       
       // Get access token from SDK
       const accessToken = await SDK.getAccessToken();
@@ -531,7 +695,14 @@ export class AiBotWorkItemService {
         "System.Id",
         "System.Title", 
         "System.State",
-        "System.WorkItemType"
+        "System.WorkItemType",
+        "System.Description",
+        "Microsoft.VSTS.Scheduling.StoryPoints",
+        "Microsoft.VSTS.Scheduling.Effort",
+        "Microsoft.VSTS.Scheduling.RemainingWork",
+        "Microsoft.VSTS.Scheduling.OriginalEstimate",
+        "Microsoft.VSTS.Scheduling.CompletedWork",
+        "System.AssignedTo"
       ];
       
       this.log(LogLevel.DEBUG, `Requesting batch data for ${childIds.length} child work items with fields`, fieldsToFetch);
@@ -721,12 +892,18 @@ export class AiBotWorkItemService {
       description: this.getFieldValue(workItem, 'System.Description') || '',
       acceptanceCriteria: this.getFieldValue(workItem, 'Microsoft.VSTS.Common.AcceptanceCriteria') || '',
       storyPoints: this.getFieldValue(workItem, 'Microsoft.VSTS.Scheduling.StoryPoints') || null,
+      effort: this.getFieldValue(workItem, 'Microsoft.VSTS.Scheduling.Effort') || null,
+      originalEstimate: this.getFieldValue(workItem, 'Microsoft.VSTS.Scheduling.OriginalEstimate') || null,
+      remainingWork: this.getFieldValue(workItem, 'Microsoft.VSTS.Scheduling.RemainingWork') || null,
+      completedWork: this.getFieldValue(workItem, 'Microsoft.VSTS.Scheduling.CompletedWork') || null,
       priority: this.getFieldValue(workItem, 'Microsoft.VSTS.Common.Priority') || null,
       createdBy: this.getFieldValue(workItem, 'System.CreatedBy')?.displayName || 'Unknown',
       assignedTo: this.getFieldValue(workItem, 'System.AssignedTo')?.displayName || 'Unassigned',
       createdDate: this.getFieldValue(workItem, 'System.CreatedDate') || null,
       changedDate: this.getFieldValue(workItem, 'System.ChangedDate') || null,
-      projectName: workItem.projectName || 'Unknown'
+      projectName: workItem.projectName || 'Unknown',
+      areaPath: this.getFieldValue(workItem, 'System.AreaPath') || null,
+      iterationPath: this.getFieldValue(workItem, 'System.IterationPath') || null
     };
     
     this.log(LogLevel.DEBUG, `Generated work item details for ID ${workItem.id}`, {
