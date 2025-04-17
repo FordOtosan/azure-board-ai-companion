@@ -915,4 +915,192 @@ export class AiBotWorkItemService {
     
     return details;
   }
+  
+  /**
+   * Generate a context prompt for the LLM based on the work item information
+   * This creates a comprehensive prompt that can be sent to the LLM to provide context
+   * about the current work item, its parent, and its children.
+   * 
+   * @param currentWorkItem The current work item
+   * @param parentWorkItem The parent work item (if available)
+   * @param childWorkItems Array of child work items (if available)
+   * @param language The language code the LLM should respond in (e.g., 'en', 'fr', 'de', etc.)
+   * @returns A formatted string prompt to send to the LLM
+   */
+  static generateWorkItemContextPrompt(
+    currentWorkItem: WorkItem | null,
+    parentWorkItem: WorkItem | null = null,
+    childWorkItems: WorkItem[] = [],
+    language: string = 'en'
+  ): string {
+    // Start building the prompt
+    let prompt = `
+You are an expert Agile Project Manager and Azure DevOps consultant. 
+You are assisting a user who is currently viewing a work item in Azure DevOps.
+Below is the information about the work item, including any parent and child relationships.
+The user will ask you questions about this work item, and you should provide helpful insights, 
+advice, and suggestions based on this context.
+
+IMPORTANT: Always respond in ${language} language.
+
+Use this information to:
+- Understand the scope and context of the work
+- Identify dependencies and relationships
+- Suggest improvements or best practices
+- Help with estimations, planning, or implementation details
+- Provide advice on agile management of these items
+
+Be conversational, helpful, and concise in your responses. Frame your answers in the context of the work items described below.
+    `;
+    
+    // If no current work item, provide a default message
+    if (!currentWorkItem) {
+      prompt += `\n\nNOTE: There is currently no work item being viewed. The user may need to navigate to a work item in Azure DevOps for context-specific assistance.\n`;
+      return prompt;
+    }
+    
+    // Add current work item details
+    const currentDetails = this.getWorkItemDetails(currentWorkItem);
+    prompt += `\n\n## CURRENT WORK ITEM\n`;
+    prompt += `ID: ${currentDetails.id}\n`;
+    prompt += `Title: ${currentDetails.title}\n`;
+    prompt += `Type: ${currentDetails.type}\n`;
+    prompt += `State: ${currentDetails.state}\n`;
+    prompt += `Project: ${currentDetails.projectName}\n`;
+    
+    if (currentDetails.priority !== null) {
+      prompt += `Priority: ${currentDetails.priority}\n`;
+    }
+    
+    if (currentDetails.storyPoints !== null) {
+      prompt += `Story Points: ${currentDetails.storyPoints}\n`;
+    }
+    
+    if (currentDetails.effort !== null) {
+      prompt += `Effort: ${currentDetails.effort}\n`;
+    }
+    
+    if (currentDetails.originalEstimate !== null || currentDetails.remainingWork !== null || currentDetails.completedWork !== null) {
+      prompt += `Estimates:\n`;
+      if (currentDetails.originalEstimate !== null) prompt += `  - Original: ${currentDetails.originalEstimate}\n`;
+      if (currentDetails.remainingWork !== null) prompt += `  - Remaining: ${currentDetails.remainingWork}\n`;
+      if (currentDetails.completedWork !== null) prompt += `  - Completed: ${currentDetails.completedWork}\n`;
+    }
+    
+    prompt += `Assigned To: ${currentDetails.assignedTo}\n`;
+    prompt += `Created By: ${currentDetails.createdBy}\n`;
+    
+    if (currentDetails.areaPath) {
+      prompt += `Area Path: ${currentDetails.areaPath}\n`;
+    }
+    
+    if (currentDetails.iterationPath) {
+      prompt += `Iteration Path: ${currentDetails.iterationPath}\n`;
+    }
+    
+    // Add description if available
+    if (currentDetails.description) {
+      // Strip HTML tags for cleaner text
+      const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, '');
+      prompt += `\nDescription:\n${stripHtml(currentDetails.description)}\n`;
+    }
+    
+    // Add acceptance criteria if available
+    if (currentDetails.acceptanceCriteria) {
+      // Strip HTML tags for cleaner text
+      const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, '');
+      prompt += `\nAcceptance Criteria:\n${stripHtml(currentDetails.acceptanceCriteria)}\n`;
+    }
+    
+    // Add parent work item details if available
+    if (parentWorkItem) {
+      const parentDetails = this.getWorkItemDetails(parentWorkItem);
+      prompt += `\n\n## PARENT WORK ITEM\n`;
+      prompt += `ID: ${parentDetails.id}\n`;
+      prompt += `Title: ${parentDetails.title}\n`;
+      prompt += `Type: ${parentDetails.type}\n`;
+      prompt += `State: ${parentDetails.state}\n`;
+      
+      if (parentDetails.storyPoints !== null) {
+        prompt += `Story Points: ${parentDetails.storyPoints}\n`;
+      }
+      
+      if (parentDetails.description) {
+        // Provide a brief summary of the description (first 200 chars)
+        const stripHtml = (html: string) => html.replace(/<[^>]*>?/gm, '');
+        const description = stripHtml(parentDetails.description);
+        prompt += `\nDescription Summary: ${description.substring(0, 200)}${description.length > 200 ? '...' : ''}\n`;
+      }
+    }
+    
+    // Add child work items if available
+    if (childWorkItems.length > 0) {
+      prompt += `\n\n## CHILD WORK ITEMS (${childWorkItems.length})\n`;
+      
+      childWorkItems.forEach((child, index) => {
+        const childDetails = this.getWorkItemDetails(child);
+        prompt += `\n### Child ${index + 1}:\n`;
+        prompt += `ID: ${childDetails.id}\n`;
+        prompt += `Title: ${childDetails.title}\n`;
+        prompt += `Type: ${childDetails.type}\n`;
+        prompt += `State: ${childDetails.state}\n`;
+        prompt += `Assigned To: ${childDetails.assignedTo}\n`;
+        
+        if (childDetails.storyPoints !== null) {
+          prompt += `Story Points: ${childDetails.storyPoints}\n`;
+        }
+        
+        if (childDetails.effort !== null) {
+          prompt += `Effort: ${childDetails.effort}\n`;
+        }
+        
+        if (childDetails.originalEstimate !== null || childDetails.remainingWork !== null) {
+          if (childDetails.originalEstimate !== null) prompt += `Original Estimate: ${childDetails.originalEstimate}\n`;
+          if (childDetails.remainingWork !== null) prompt += `Remaining Work: ${childDetails.remainingWork}\n`;
+        }
+      });
+    }
+    
+    // Add a summary of the relationships
+    prompt += `\n\n## RELATIONSHIPS SUMMARY\n`;
+    if (parentWorkItem) {
+      prompt += `- This ${currentDetails.type.toLowerCase()} is part of the ${this.getWorkItemDetails(parentWorkItem).type.toLowerCase()} "${this.getWorkItemDetails(parentWorkItem).title}"\n`;
+    } else {
+      prompt += `- This ${currentDetails.type.toLowerCase()} does not have a parent work item\n`;
+    }
+    
+    if (childWorkItems.length > 0) {
+      prompt += `- This ${currentDetails.type.toLowerCase()} has ${childWorkItems.length} child item${childWorkItems.length === 1 ? '' : 's'}\n`;
+      
+      // Summarize child item types
+      const typeCounts: Record<string, number> = {};
+      childWorkItems.forEach(child => {
+        const type = this.getWorkItemDetails(child).type;
+        typeCounts[type] = (typeCounts[type] || 0) + 1;
+      });
+      
+      Object.entries(typeCounts).forEach(([type, count]) => {
+        prompt += `  - ${count} ${type.toLowerCase()}${count === 1 ? '' : 's'}\n`;
+      });
+      
+      // Summarize child item states
+      const stateCounts: Record<string, number> = {};
+      childWorkItems.forEach(child => {
+        const state = this.getWorkItemDetails(child).state;
+        stateCounts[state] = (stateCounts[state] || 0) + 1;
+      });
+      
+      prompt += `- Child items by state:\n`;
+      Object.entries(stateCounts).forEach(([state, count]) => {
+        prompt += `  - ${count} in ${state} state\n`;
+      });
+    } else {
+      prompt += `- This ${currentDetails.type.toLowerCase()} does not have any child items\n`;
+    }
+    
+    // Final instruction for the LLM
+    prompt += `\n\nRespond to the user's questions with helpful, actionable insights based on this work item context. If the user asks about something that's not in this context, you can answer based on your general knowledge of Agile and Azure DevOps best practices, but make it clear when you're doing so. Remember to always respond in ${language} language.`;
+    
+    return prompt;
+  }
 } 

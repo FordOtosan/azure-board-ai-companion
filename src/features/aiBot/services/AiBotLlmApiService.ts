@@ -252,27 +252,47 @@ export class AiBotLlmApiService {
           });
       } else if (config.provider === 'gemini') {
         // For Gemini, we need to format the history differently
-        // and ensure there's only ONE system message
+        // Gemini doesn't have a 'system' role, so we need special handling
         let formattedHistory: any[] = [];
-        let hasSystemMessage = false;
         
-        // Process message history to ensure only one system message
-        messageHistory.forEach(msg => {
-          if (msg.role === 'system') {
-            if (!hasSystemMessage) {
-              formattedHistory.push({
-                role: 'user', // Gemini doesn't have 'system' role, so we use 'user'
-                parts: [{ text: msg.content }]
-              });
-              hasSystemMessage = true;
-            }
-            // Skip additional system messages
-          } else {
-            formattedHistory.push({
-              role: msg.role === 'assistant' ? 'model' : 'user',
-              parts: [{ text: msg.content }]
-            });
-          }
+        // First, check if we have a system message (work item context)
+        const systemMessages = messageHistory.filter(msg => msg.role === 'system');
+        const nonSystemMessages = messageHistory.filter(msg => msg.role !== 'system');
+        
+        // If we have system messages, add them as a special prefixed user message
+        if (systemMessages.length > 0) {
+          // Combine all system messages
+          let combinedSystemContent = systemMessages.map(msg => msg.content).join('\n\n');
+          
+          // Create a special prefixed message that clearly marks this as system context
+          const prefixedSystemMessage = 
+            "###SYSTEM CONTEXT (IMPORTANT - NOT USER QUERY)###\n\n" + 
+            combinedSystemContent + 
+            "\n\n###END SYSTEM CONTEXT###\n\n" +
+            "Please keep the above context in mind when responding to my questions. My first question is coming next.";
+          
+          console.log("DEBUG - Adding special system context message for Gemini with length:", prefixedSystemMessage.length);
+          console.log("DEBUG - System context includes work item details:", prefixedSystemMessage.includes("CURRENT WORK ITEM") ? "Yes" : "No");
+          
+          // Add as the first user message
+          formattedHistory.push({
+            role: 'user',
+            parts: [{ text: prefixedSystemMessage }]
+          });
+          
+          // Add a model response to acknowledge the system context
+          formattedHistory.push({
+            role: 'model',
+            parts: [{ text: "I'll keep that context in mind when answering your questions." }]
+          });
+        }
+        
+        // Then add all non-system messages with the appropriate role conversion
+        nonSystemMessages.forEach(msg => {
+          formattedHistory.push({
+            role: msg.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: msg.content }]
+          });
         });
         
         // Add the current prompt as the latest user message if no history
@@ -589,19 +609,68 @@ export class AiBotLlmApiService {
       onError(new Error('No LLM configuration available'));
       return Promise.reject(new Error('No LLM configuration available'));
     }
-
-    // Add language instruction to system message if we don't have history
-    let updatedHistory = [...messageHistory];
     
-    // Check if we need to add a system message with language instruction
-    const hasSystemMessage = messageHistory.some(msg => msg.role === 'system');
-    if (!hasSystemMessage) {
+    console.log("DEBUG - streamChatToLlm received message history:", JSON.stringify(messageHistory));
+
+    // Process and combine system messages to ensure work item context is preserved
+    let updatedHistory: ChatMessage[] = [];
+    let combinedSystemContent = '';
+    let nonSystemMessages: ChatMessage[] = [];
+    
+    // Debug the initial message history
+    console.log("DEBUG - Initial messageHistory:", JSON.stringify(messageHistory.map(msg => ({
+      role: msg.role,
+      contentLength: msg.content.length,
+      contentPreview: msg.content.substring(0, 100) + (msg.content.length > 100 ? '...' : '')
+    }))));
+    
+    // First separate system from non-system messages
+    messageHistory.forEach(msg => {
+      if (msg.role === 'system') {
+        // Collect system message content
+        combinedSystemContent += msg.content + '\n\n';
+      } else {
+        // Keep non-system messages
+        nonSystemMessages.push(msg);
+      }
+    });
+    
+    // Make sure combinedSystemContent is not empty and add language instruction
+    if (combinedSystemContent) {
+      // Check if we have work item details
+      const hasWorkItemDetails = combinedSystemContent.includes("CURRENT WORK ITEM");
+      console.log("DEBUG - System message contains work item details:", hasWorkItemDetails);
+      
+      if (hasWorkItemDetails) {
+        console.log("DEBUG - Work item details found in system message");
+      } else {
+        console.log("DEBUG - No work item details found in system message!");
+      }
+      
+      // The work item details are already included in the system messages from AiBotWorkItemService
+      // Add language instruction at the end so it doesn't interfere with work item details
       const languageInstruction = `Please provide your response in ${language} language.`;
-      updatedHistory.unshift({
+      combinedSystemContent += '\n\n' + languageInstruction;
+    } else {
+      // If no system content (no work item context), just add the language instruction
+      console.log("DEBUG - No system content found at all!");
+      combinedSystemContent = `Please provide your response in ${language} language.`;
+    }
+    
+    console.log("DEBUG - Final system content length:", combinedSystemContent.length);
+    console.log("DEBUG - Work item context included in system message:", 
+      combinedSystemContent.includes("CURRENT WORK ITEM") ? "Yes" : "No");
+    
+    // Create a single system message with all the system content
+    if (combinedSystemContent) {
+      updatedHistory.push({
         role: 'system',
-        content: languageInstruction
+        content: combinedSystemContent.trim()
       });
     }
+    
+    // Add all non-system messages
+    updatedHistory = [...updatedHistory, ...nonSystemMessages];
 
     // Add the user prompt if not already in history
     const lastMessageIsUser = messageHistory.length > 0 && 

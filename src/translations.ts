@@ -23,7 +23,11 @@ export const translations = {
         methodFailed: (params: { method: string; msg: string }) => `Method '${params.method}' failed: ${params.msg}`,
         methodFoundNoTeams: (params: { method: string }) => `Method '${params.method}' found no teams.`,
         placeholderResponse: (params: { ctx: string; prompt: string }) => `Placeholder response (${params.ctx}) for: \"${params.prompt}\"`,
-        shiftEnterHint: "(Shift+Enter for new line)" // Note: This might be duplicated in ChatInput, consider consolidating
+        shiftEnterHint: "(Shift+Enter for new line)",
+        // Model change dialog
+        modelChangeTitle: "Change AI Model",
+        cancel: "Cancel",
+        confirm: "Continue"
     },
     tr: {
         initializing: "Başlatılıyor...",
@@ -45,6 +49,10 @@ export const translations = {
         methodFailed: (params: { method: string; msg: string }) => `Yöntem '${params.method}' başarısız oldu: ${params.msg}`,
         methodFoundNoTeams: (params: { method: string }) => `Yöntem '${params.method}' takım bulamadı.`,
         placeholderResponse: (params: { ctx: string; prompt: string }) => `\"${params.prompt}\" için örnek yanıt (${params.ctx}).`,
-        shiftEnterHint: "(Yeni satır için Shift+Enter)" // Note: This might be duplicated in ChatInput, consider consolidating
+        shiftEnterHint: "(Yeni satır için Shift+Enter)",
+        // Model change dialog
+        modelChangeTitle: "AI Modelini Değiştir",
+        cancel: "İptal",
+        confirm: "Devam Et"
     }
 };

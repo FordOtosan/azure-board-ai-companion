@@ -8,135 +8,36 @@ import {
   Typography,
   useTheme
 } from '@mui/material';
-import { WorkItem } from 'azure-devops-extension-api/WorkItemTracking';
-import React, { useEffect, useState } from 'react';
+import React, { useContext } from 'react';
 import { AiBotWorkItemService } from '../services/AiBotWorkItemService';
 import { AiBotWorkItemCard } from './AiBotWorkItemCard';
+import { AiBotWorkItemContextProvider, WorkItemContext } from './AiBotWorkItemContextProvider';
 
-export const AiBotWorkItemInfo: React.FC = () => {
+// Inner component that uses the WorkItemContext
+const AiBotWorkItemInfoInner: React.FC = () => {
   const theme = useTheme();
+  const { currentWorkItem, parentWorkItem, childWorkItems, isLoading, error } = useContext(WorkItemContext);
   
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
-  const [currentWorkItem, setCurrentWorkItem] = useState<WorkItem | null>(null);
-  const [parentWorkItem, setParentWorkItem] = useState<WorkItem | null>(null);
-  const [childWorkItems, setChildWorkItems] = useState<WorkItem[]>([]);
-  const [expanded, setExpanded] = useState<boolean>(false);
-  const [parentExpanded, setParentExpanded] = useState<boolean>(false);
-  const [childrenExpanded, setChildrenExpanded] = useState<boolean>(false);
-  const [loadingTimeout, setLoadingTimeout] = useState<boolean>(false);
+  const [expanded, setExpanded] = React.useState<boolean>(false);
+  const [parentExpanded, setParentExpanded] = React.useState<boolean>(false);
+  const [childrenExpanded, setChildrenExpanded] = React.useState<boolean>(false);
+  const [loadingTimeout, setLoadingTimeout] = React.useState<boolean>(false);
   
-  // Fetch work item data on component mount
-  useEffect(() => {
-    const fetchWorkItemData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        setLoadingTimeout(false);
-        
-        // Set a timeout to prevent infinite loading
-        const timeoutId = setTimeout(() => {
+  // Set a timeout to show a message for long-running operations
+  React.useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => {
           setLoadingTimeout(true);
-        }, 10000); // 10 seconds timeout
-        
-        // Get current work item
-        const workItem = await AiBotWorkItemService.getCurrentWorkItem();
-        
-        // Clear timeout since we got a response
-        clearTimeout(timeoutId);
-        
-        if (!workItem) {
-          setError('No work item information available. This could be because you are not viewing a work item, or there was an issue accessing the work item data.');
-          setLoading(false);
-          return;
-        }
-        
-        setCurrentWorkItem(workItem);
-        
-        // Get parent work item if it exists
-        try {
-          const parent = await AiBotWorkItemService.getParentWorkItem(workItem);
-          setParentWorkItem(parent);
-        } catch (parentError) {
-          console.warn('Error fetching parent work item:', parentError);
-          // Don't fail the whole component if just the parent fetch fails
-        }
-        
-        // Get child work items if they exist
-        try {
-          const children = await AiBotWorkItemService.getChildWorkItems(workItem);
-          setChildWorkItems(children);
-        } catch (childrenError) {
-          console.warn('Error fetching child work items:', childrenError);
-          // Don't fail the whole component if just the children fetch fails
-        }
-        
-        setLoading(false);
-      } catch (err: any) {
-        console.error('Error fetching work item data:', err);
-        setError(`Failed to load work item data: ${err?.message || 'Unknown error'}`);
-        setLoading(false);
-      }
-    };
-    
-    fetchWorkItemData();
-  }, []);
+      }, 10000); // 10 seconds
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading]);
   
   // Handle retry
   const handleRetry = () => {
-    // Reset states and trigger a re-fetch
-    setCurrentWorkItem(null);
-    setParentWorkItem(null);
-    setChildWorkItems([]);
-    setError(null);
-    
-    const fetchWorkItemData = async () => {
-      try {
-        setLoading(true);
-        
-        // Set a timeout to prevent infinite loading
-        const timeoutId = setTimeout(() => {
-          setLoadingTimeout(true);
-        }, 10000); // 10 seconds timeout
-        
-        // Get current work item - with shorter timeout
-        const workItem = await Promise.race([
-          AiBotWorkItemService.getCurrentWorkItem(),
-          new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)) // 8 second timeout
-        ]);
-        
-        clearTimeout(timeoutId);
-        
-        if (!workItem) {
-          setError('Unable to load work item information after retry.');
-          setLoading(false);
-          return;
-        }
-        
-        setCurrentWorkItem(workItem);
-        
-        // Get parent and child items concurrently to save time, but handle errors individually
-        try {
-          const [parent, children] = await Promise.all([
-            AiBotWorkItemService.getParentWorkItem(workItem).catch(() => null),
-            AiBotWorkItemService.getChildWorkItems(workItem).catch(() => [])
-          ]);
-          
-          setParentWorkItem(parent);
-          setChildWorkItems(children || []);
-        } catch (relationsError) {
-          console.warn('Error fetching relations:', relationsError);
-        }
-        
-        setLoading(false);
-      } catch (err: any) {
-        console.error('Error during retry:', err);
-        setError(`Retry failed: ${err?.message || 'Unknown error'}`);
-        setLoading(false);
-      }
-    };
-    
-    fetchWorkItemData();
+    // Reload the page to trigger a fresh fetch
+    window.location.reload();
   };
   
   // Handle main accordion expansion
@@ -155,7 +56,7 @@ export const AiBotWorkItemInfo: React.FC = () => {
   };
   
   // If loading, show loading spinner with timeout message if applicable
-  if (loading) {
+  if (isLoading) {
     return (
       <Box sx={{ p: 2, textAlign: 'center' }}>
         <CircularProgress size={24} />
@@ -182,7 +83,7 @@ export const AiBotWorkItemInfo: React.FC = () => {
             <Typography 
               variant="caption" 
               component="span"
-              onClick={() => setLoading(false)}
+              onClick={() => window.location.reload()}
               sx={{ 
                 cursor: 'pointer', 
                 color: theme.palette.primary.main,
@@ -366,5 +267,14 @@ export const AiBotWorkItemInfo: React.FC = () => {
         </AccordionDetails>
       </Accordion>
     </Box>
+  );
+};
+
+// Wrapper component that provides the context
+export const AiBotWorkItemInfo: React.FC = () => {
+  return (
+    <AiBotWorkItemContextProvider>
+      <AiBotWorkItemInfoInner />
+    </AiBotWorkItemContextProvider>
   );
 }; 

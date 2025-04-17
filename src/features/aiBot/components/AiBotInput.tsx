@@ -20,6 +20,7 @@ interface AiBotInputProps {
   currentLlm: LlmConfig | null;
   onSendMessage: (message: string) => void;
   onStopGeneration: () => void;
+  workItemContextReady?: boolean; // New prop to track if work item context is ready
 }
 
 // Input component translations
@@ -30,6 +31,7 @@ const inputTranslations = {
     sendMessage: 'Send',
     shiftEnterHint: '(Shift+Enter for new line)',
     selectLlm: 'Please select an LLM to start chatting',
+    loadingWorkItem: 'Loading work item details...',
   },
   tr: {
     typeMessage: 'Bir mesaj yazın...',
@@ -37,6 +39,7 @@ const inputTranslations = {
     sendMessage: 'Gönder',
     shiftEnterHint: '(Yeni satır için Shift+Enter)',
     selectLlm: 'Sohbete başlamak için bir LLM seçin',
+    loadingWorkItem: 'İş öğesi detayları yükleniyor...',
   }
 };
 
@@ -49,6 +52,7 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
   currentLlm,
   onSendMessage,
   onStopGeneration,
+  workItemContextReady = true, // Default to true so it doesn't break existing usage
 }) => {
   const [message, setMessage] = useState('');
   const [inputDisabled, setInputDisabled] = useState(false);
@@ -60,10 +64,15 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
 
   // Update input disabled state when isLoading changes
   useEffect(() => {
-    console.log("isLoading changed:", isLoading);
+    console.log("isLoading or workItemContextReady changed:", { isLoading, workItemContextReady });
     isLoadingRef.current = isLoading;
     setInternalIsLoading(isLoading);
-    setInputDisabled(isLoading || !currentLlm);
+    
+    // Disable input if:
+    // 1. Messages are being generated (isLoading) OR
+    // 2. No LLM is selected OR
+    // 3. Work item context is not ready yet
+    setInputDisabled(isLoading || !currentLlm || !workItemContextReady);
     
     // Clear any existing timer
     if (loadingTimerRef.current) {
@@ -77,10 +86,10 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
       loadingTimerRef.current = window.setTimeout(() => {
         console.log("Safety timeout: Auto-resetting loading state after 30 seconds");
         setInternalIsLoading(false);
-        setInputDisabled(!currentLlm);
+        setInputDisabled(!currentLlm || !workItemContextReady);
       }, AUTO_RESET_TIMEOUT);
     }
-  }, [isLoading, currentLlm]);
+  }, [isLoading, currentLlm, workItemContextReady]);
   
   // Cleanup timer on unmount
   useEffect(() => {
@@ -115,6 +124,9 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
   };
 
   const getPlaceholderText = () => {
+    if (!workItemContextReady) {
+      return T.loadingWorkItem;
+    }
     if (!currentLlm) {
       return T.selectLlm;
     }

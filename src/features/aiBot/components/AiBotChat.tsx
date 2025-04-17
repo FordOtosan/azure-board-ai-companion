@@ -1,5 +1,5 @@
 import { Box } from '@mui/material';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useContext, useEffect, useRef, useState } from 'react';
 import { LlmConfig, LlmSettings } from '../../../features/settings/services/LlmSettingsService';
 import {
     ChatMessage,
@@ -8,9 +8,11 @@ import {
 } from '../../../services/api/LlmApiService';
 import { Language, translations } from '../../../translations';
 import { AiBotLlmApiService } from '../services/AiBotLlmApiService';
+import { AiBotWorkItemService } from '../services/AiBotWorkItemService';
 import { AiBotInput } from './AiBotInput';
 import { AiBotMessages } from './AiBotMessages';
 import { AiBotWorkItemInfo } from './AiBotWorkItemInfo';
+import { WorkItemContext } from './AiBotWorkItemContextProvider';
 
 // Define message type for the AI Bot chat
 export interface AiBotMessage {
@@ -39,8 +41,13 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [llmHistory, setLlmHistory] = useState<ChatMessage[]>([]);
   const [streamingMessageId, setStreamingMessageId] = useState<string | number | null>(null);
+  const [initialPromptSent, setInitialPromptSent] = useState<boolean>(false);
+  const [workItemContextReady, setWorkItemContextReady] = useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const responseAccumulatorRef = useRef<string>('');
+  
+  // Get work item context for the initial prompt
+  const { currentWorkItem, parentWorkItem, childWorkItems, isLoading: isWorkItemLoading } = useContext(WorkItemContext);
   
   const T = translations[currentLanguage];
 
@@ -61,6 +68,69 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       ]);
     }
   }, []);
+  
+  // Add initial system prompt with work item details when they are loaded
+  useEffect(() => {
+    const sendInitialSystemPrompt = async () => {
+      // Check if work item is loading
+      if (isWorkItemLoading) {
+        console.log("Work item data is still loading...");
+        setWorkItemContextReady(false);
+        return;
+      }
+      
+      // Check if we have work item data
+      if (currentWorkItem) {
+        try {
+          console.log("Sending initial system prompt with work item details");
+          
+          // Generate the work item context prompt
+          const workItemPrompt = AiBotWorkItemService.generateWorkItemContextPrompt(
+            currentWorkItem,
+            parentWorkItem,
+            childWorkItems,
+            currentLanguage
+          );
+          
+          // Log the full work item prompt for debugging
+          console.log("==== FULL WORK ITEM CONTEXT PROMPT START ====");
+          console.log(workItemPrompt);
+          console.log("==== FULL WORK ITEM CONTEXT PROMPT END ====");
+          
+          console.log("DEBUG - Work item prompt generated:", {
+            length: workItemPrompt.length,
+            hasWorkItemSection: workItemPrompt.includes("CURRENT WORK ITEM"),
+            hasChildItems: workItemPrompt.includes("CHILD WORK ITEMS"),
+            firstFewLines: workItemPrompt.split('\n').slice(0, 3).join('\n')
+          });
+          
+          // Add the system prompt to history (but don't display it to user)
+          setLlmHistory(prevHistory => [
+            { role: 'system', content: workItemPrompt },
+            ...prevHistory
+          ]);
+          
+          // Mark as sent so we don't send again
+          setInitialPromptSent(true);
+          
+          // Mark work item context as ready
+          setWorkItemContextReady(true);
+          
+          console.log("Initial system prompt sent successfully, chat input enabled");
+        } catch (error) {
+          console.error("Error sending initial system prompt:", error);
+          // Even if there's an error, enable chat input so users can still use the bot
+          setWorkItemContextReady(true);
+        }
+      } else {
+        // No work item data, but we can still enable the chat
+        console.log("No work item data available, but enabling chat input anyway");
+        setWorkItemContextReady(true);
+      }
+    };
+    
+    sendInitialSystemPrompt();
+  }, [currentWorkItem, parentWorkItem, childWorkItems, isWorkItemLoading, currentLanguage]);
 
   // Handle stream complete
   const handleStreamComplete = (fullResponse: string) => {
@@ -171,7 +241,27 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
 
   // Handle sending a message
   const handleSendMessage = async (prompt: string) => {
-    if (!prompt.trim() || isLoading || !currentLlm) return;
+    // Debug the current work item state before doing anything else
+    console.log("WORK ITEM DEBUG STATE:", {
+      currentWorkItemExists: !!currentWorkItem,
+      currentWorkItemId: currentWorkItem?.id || 'none',
+      currentWorkItemType: currentWorkItem?.fields?._TypeId || 'unknown',
+      parentExists: !!parentWorkItem, 
+      childCount: childWorkItems?.length || 0,
+      isWorkItemLoading: isWorkItemLoading,
+      contextReady: workItemContextReady
+    });
+    
+    // Don't allow sending if chat is loading or if work item context isn't ready yet
+    if (!prompt.trim() || isLoading || !currentLlm || !workItemContextReady) {
+      console.log("Cannot send message:", { 
+        isEmptyPrompt: !prompt.trim(), 
+        isLoading, 
+        hasLlm: !!currentLlm, 
+        workItemContextReady 
+      });
+      return;
+    }
     
     // Create user message
     const userMessageId = Date.now();
@@ -193,12 +283,106 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       setStreamingMessageId(responseMessageId);
       responseAccumulatorRef.current = '';
       
-      // Update LLM history with user message
-      const updatedHistory = [
-        ...llmHistory,
-        { role: 'user' as const, content: prompt }
-      ];
+      // ALWAYS generate a fresh work item context for each message to ensure it's included
+      let updatedHistory: ChatMessage[] = [];
+      
+      // Force a direct fetch of work item data to ensure it's available
+      try {
+        console.log("Directly fetching current work item data...");
+        const directWorkItem = await AiBotWorkItemService.getCurrentWorkItem();
+        
+        if (directWorkItem) {
+          console.log("Successfully fetched work item directly - ID:", directWorkItem.id);
+          
+          // Now get parent and children
+          const directParent = await AiBotWorkItemService.getParentWorkItem(directWorkItem).catch(() => null);
+          const directChildren = await AiBotWorkItemService.getChildWorkItems(directWorkItem).catch(() => []);
+          
+          // Generate the work item context prompt
+          const workItemPrompt = AiBotWorkItemService.generateWorkItemContextPrompt(
+            directWorkItem,
+            directParent,
+            directChildren,
+            currentLanguage
+          );
+          
+          // Log the work item context
+          console.log("==== FRESH WORK ITEM CONTEXT FOR MESSAGE ====");
+          console.log(workItemPrompt);
+          console.log("==== END WORK ITEM CONTEXT FOR MESSAGE ====");
+          
+          console.log("Adding work item context to message history:", {
+            hasWorkItemSection: workItemPrompt.includes("CURRENT WORK ITEM"),
+            contextLength: workItemPrompt.length
+          });
+          
+          // Add system message with work item details first
+          updatedHistory.push({ role: 'system', content: workItemPrompt });
+        } else {
+          // Fall back to context if direct fetch fails
+          if (currentWorkItem) {
+            console.log("Direct fetch returned no results, using context work item - ID:", currentWorkItem.id);
+            
+            // Generate the work item context prompt
+            const workItemPrompt = AiBotWorkItemService.generateWorkItemContextPrompt(
+              currentWorkItem,
+              parentWorkItem,
+              childWorkItems,
+              currentLanguage
+            );
+            
+            // Log the work item context
+            console.log("==== FRESH WORK ITEM CONTEXT FOR MESSAGE ====");
+            console.log(workItemPrompt);
+            console.log("==== END WORK ITEM CONTEXT FOR MESSAGE ====");
+            
+            console.log("Adding work item context to message history:", {
+              hasWorkItemSection: workItemPrompt.includes("CURRENT WORK ITEM"),
+              contextLength: workItemPrompt.length
+            });
+            
+            // Add system message with work item details first
+            updatedHistory.push({ role: 'system', content: workItemPrompt });
+          } else {
+            console.log("No work item available from either direct fetch or context");
+          }
+        }
+      } catch (workItemError) {
+        console.error("Error fetching work item directly:", workItemError);
+        
+        // Still try to use context if direct fetch fails
+        if (currentWorkItem) {
+          console.log("Using context work item as fallback - ID:", currentWorkItem.id);
+          
+          // Generate the work item context prompt
+          const workItemPrompt = AiBotWorkItemService.generateWorkItemContextPrompt(
+            currentWorkItem,
+            parentWorkItem,
+            childWorkItems,
+            currentLanguage
+          );
+          
+          // Add system message with work item details first
+          updatedHistory.push({ role: 'system', content: workItemPrompt });
+        } else {
+          console.log("No work item available, not adding work item context to message");
+        }
+      }
+      
+      // Then add all previous non-system messages from history
+      const previousMessages = llmHistory.filter(msg => msg.role !== 'system');
+      updatedHistory = [...updatedHistory, ...previousMessages];
+      
+      // Finally add the new user message
+      updatedHistory.push({ role: 'user', content: prompt });
+      
+      // Update LLM history with the new history that includes fresh work item context
       setLlmHistory(updatedHistory);
+      
+      console.log("Final message history being sent:", JSON.stringify(updatedHistory.map(msg => ({
+        role: msg.role,
+        contentPreview: msg.content.substring(0, 50) + (msg.content.length > 50 ? '...' : '')
+      }))));
       
       // Setup abort controller
       abortControllerRef.current = new AbortController();
@@ -355,6 +539,7 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
         onSendMessage={handleSendMessage}
         onStopGeneration={handleStopGeneration}
         currentLlm={currentLlm}
+        workItemContextReady={workItemContextReady}
       />
     </Box>
   );
