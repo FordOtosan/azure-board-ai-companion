@@ -11,8 +11,8 @@ import { AiBotLlmApiService } from '../services/AiBotLlmApiService';
 import { AiBotWorkItemService } from '../services/AiBotWorkItemService';
 import { AiBotInput } from './AiBotInput';
 import { AiBotMessages } from './AiBotMessages';
-import { AiBotWorkItemInfo } from './AiBotWorkItemInfo';
 import { WorkItemContext } from './AiBotWorkItemContextProvider';
+import { AiBotWorkItemInfo } from './AiBotWorkItemInfo';
 
 // Define message type for the AI Bot chat
 export interface AiBotMessage {
@@ -142,8 +142,8 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       return;
     }
     
-    // Ensure newlines are properly formatted
-    const formattedResponse = fullResponse.replace(/\\n/g, '\n');
+    // No longer need to replace newlines as we'll use them for Markdown rendering
+    const formattedResponse = fullResponse;
     
     // Update the final message with the complete response
     setMessages(prevMessages => {
@@ -419,44 +419,36 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
 
   // Update streaming message with new content
   const updateStreamingMessage = (content: string) => {
-    // Log the received chunk for debugging
-    console.log(`Received streaming chunk: ${content.length > 50 ? content.substring(0, 50) + '...' : content}`);
-    
-    // Ensure newlines are properly formatted
-    const formattedContent = content.replace(/\\n/g, '\n');
-    
-    // Accumulate the response
-    responseAccumulatorRef.current += formattedContent;
-
-    // Create or update the streaming message
-    setMessages(prevMessages => {
-      // Check if there is already an assistant message that we can update
-      const assistantMessageIndex = prevMessages.findIndex(
-        msg => msg.role === 'assistant' && (msg.isStreaming === true || msg.id === streamingMessageId)
-      );
+    if (streamingMessageId === null) {
+      console.log("Setting streamingMessageId to new id");
       
-      if (assistantMessageIndex !== -1) {
-        // Update existing message
-        console.log("Updating existing assistant message");
-        return prevMessages.map((msg, index) => 
-          index === assistantMessageIndex
-            ? { ...msg, content: responseAccumulatorRef.current, isStreaming: true }
+      // Generate a new ID for the streaming message
+      const newId = Date.now();
+      setStreamingMessageId(newId);
+      
+      // Add a new streaming message
+      setMessages(prevMessages => [
+        ...prevMessages,
+        {
+          id: newId,
+          role: 'assistant',
+          content: content,
+          isStreaming: true
+        }
+      ]);
+    } else {
+      // Update the content of the existing streaming message
+      // Here we keep the raw content without processing to preserve Markdown
+      responseAccumulatorRef.current += content;
+      
+      setMessages(prevMessages => {
+        return prevMessages.map(msg =>
+          msg.id === streamingMessageId
+            ? { ...msg, content: responseAccumulatorRef.current }
             : msg
         );
-      } else {
-        // Create new streaming message if none exists
-        console.log("Creating new assistant message with ID:", streamingMessageId);
-        return [
-          ...prevMessages,
-          {
-            id: streamingMessageId || Date.now(),
-            role: 'assistant',
-            content: formattedContent,
-            isStreaming: true
-          }
-        ];
-      }
-    });
+      });
+    }
   };
 
   // New function that uses a specific message ID rather than relying on state

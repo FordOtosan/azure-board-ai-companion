@@ -51,6 +51,201 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
     }
   };
 
+  // Define custom components for ReactMarkdown
+  const markdownComponents = {
+    h1: ({ children }: any) => (
+      <Typography 
+        variant="h4" 
+        component="h1" 
+        sx={{ 
+          fontWeight: 600, 
+          mt: 3, 
+          mb: 2,
+          borderBottom: `1px solid ${theme.palette.divider}`,
+          pb: 1,
+          color: theme.palette.primary.main
+        }}
+      >
+        {children}
+      </Typography>
+    ),
+    h2: ({ children }: any) => (
+      <Typography 
+        variant="h5" 
+        component="h2" 
+        sx={{ 
+          fontWeight: 600, 
+          mt: 2.5, 
+          mb: 1.5,
+          color: theme.palette.primary.dark
+        }}
+      >
+        {children}
+      </Typography>
+    ),
+    h3: ({ children }: any) => (
+      <Typography 
+        variant="h6" 
+        component="h3" 
+        sx={{ 
+          fontWeight: 600, 
+          mt: 2, 
+          mb: 1
+        }}
+      >
+        {children}
+      </Typography>
+    ),
+    p: ({ children }: any) => (
+      <Typography 
+        component="p" 
+        variant="body1" 
+        sx={{ 
+          whiteSpace: 'pre-line',
+          my: 1,
+          lineHeight: 1.6
+        }}
+      >
+        {children}
+      </Typography>
+    ),
+    ul: ({ children }: any) => (
+      <Box 
+        component="ul" 
+        sx={{ 
+          pl: 3, 
+          my: 1.5,
+          '& li': {
+            mb: 0.5
+          }
+        }}
+      >
+        {children}
+      </Box>
+    ),
+    ol: ({ children }: any) => (
+      <Box 
+        component="ol" 
+        sx={{ 
+          pl: 3, 
+          my: 1.5,
+          '& li': {
+            mb: 0.5
+          }
+        }}
+      >
+        {children}
+      </Box>
+    ),
+    li: ({ children }: any) => (
+      <Box 
+        component="li" 
+        sx={{ 
+          '& p': { 
+            my: 0.5 
+          }
+        }}
+      >
+        <Typography variant="body1">{children}</Typography>
+      </Box>
+    ),
+    blockquote: ({ children }: any) => (
+      <Box 
+        component="blockquote" 
+        sx={{ 
+          borderLeft: `4px solid ${theme.palette.primary.light}`,
+          pl: 2,
+          py: 0.5,
+          my: 1.5,
+          backgroundColor: theme.palette.background.paper,
+          borderRadius: '4px'
+        }}
+      >
+        {children}
+      </Box>
+    ),
+    code: ({ inline, className, children }: any) => {
+      const match = /language-(\w+)/.exec(className || '');
+      return !inline ? (
+        <Box 
+          component="pre" 
+          sx={{ 
+            backgroundColor: theme.palette.grey[100],
+            p: 2,
+            borderRadius: 1,
+            overflowX: 'auto',
+            my: 2,
+            fontFamily: 'monospace',
+            fontSize: '0.875rem',
+            lineHeight: 1.5,
+            border: `1px solid ${theme.palette.divider}`
+          }}
+          className={className}
+        >
+          <code className={match ? `language-${match[1]}` : ''}>
+            {String(children).replace(/\n$/, '')}
+          </code>
+        </Box>
+      ) : (
+        <Box 
+          component="code" 
+          sx={{ 
+            backgroundColor: theme.palette.grey[200],
+            px: 0.5,
+            py: 0.3,
+            borderRadius: 0.5,
+            fontFamily: 'monospace',
+            fontSize: '0.875em'
+          }}
+        >
+          {children}
+        </Box>
+      );
+    },
+    table: ({ children }: any) => (
+      <Box 
+        component="div" 
+        sx={{ 
+          overflowX: 'auto',
+          my: 2
+        }}
+      >
+        <Box 
+          component="table" 
+          sx={{ 
+            borderCollapse: 'collapse',
+            width: '100%',
+            border: `1px solid ${theme.palette.divider}`,
+            '& th, & td': {
+              border: `1px solid ${theme.palette.divider}`,
+              p: 1.5,
+              textAlign: 'left'
+            },
+            '& th': {
+              backgroundColor: theme.palette.grey[100],
+              fontWeight: 600
+            },
+            '& tr:nth-of-type(even)': {
+              backgroundColor: theme.palette.grey[50]
+            }
+          }}
+        >
+          {children}
+        </Box>
+      </Box>
+    ),
+    hr: () => (
+      <Box 
+        component="hr" 
+        sx={{ 
+          my: 3,
+          borderWidth: 0,
+          borderTop: `1px solid ${theme.palette.divider}`
+        }}
+      />
+    ),
+  };
+
   return (
     <Box 
       sx={{ 
@@ -116,59 +311,18 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
                 }
               }}>
                 {msg.role === 'assistant' ? (
-                  <Box sx={{
-                    '& pre': {
-                      backgroundColor: theme.palette.grey[50],
-                      padding: theme.spacing(1),
-                      borderRadius: theme.spacing(1),
-                      overflow: 'auto',
-                    },
-                    '& code': {
-                      backgroundColor: theme.palette.grey[200],
-                      padding: '2px 4px',
-                      borderRadius: '4px',
-                      fontSize: '0.875em',
-                      color: theme.palette.text.primary
-                    },
-                    '& p': {
-                      margin: '0.5em 0',
-                      whiteSpace: 'pre-line',
-                      '&:first-of-type': { marginTop: 0 },
-                      '&:last-child': { marginBottom: 0 }
-                    },
-                    '& ul, & ol': {
-                      marginTop: '0.5em',
-                      marginBottom: '0.5em',
-                      paddingLeft: '1.5em',
-                    }
-                  }}>
-                    <ReactMarkdown 
-                      remarkPlugins={[remarkGfm, remarkBreaks]}
-                      components={{
-                        p: ({children}) => (
-                          <Typography 
-                            component="p" 
-                            variant="body1" 
-                            sx={{ 
-                              whiteSpace: 'pre-line',
-                              my: 1
-                            }}
-                          >
-                            {children}
-                          </Typography>
-                        ),
-                        br: () => <br />
-                      }}
-                    >
-                      {msg.content.replace(/\\n/g, '\n')}
-                    </ReactMarkdown>
-                  </Box>
+                  <ReactMarkdown 
+                    remarkPlugins={[remarkGfm, remarkBreaks]}
+                    components={markdownComponents}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
                 ) : (
                   <Typography 
                     variant="body1" 
                     sx={{ whiteSpace: 'pre-line' }}
                   >
-                    {msg.content.replace(/\\n/g, '\n')}
+                    {msg.content}
                   </Typography>
                 )}
               </Box>

@@ -943,6 +943,17 @@ advice, and suggestions based on this context.
 
 IMPORTANT: Always respond in ${language} language.
 
+MARKDOWN FORMATTING INSTRUCTIONS:
+When providing content for titles, descriptions, or acceptance criteria, use rich Markdown formatting:
+- Use # headers for titles (e.g., # Title)
+- Use ## for section headers (e.g., ## Description, ## Acceptance Criteria)
+- Use proper list formatting with - or 1. for numbered lists
+- Use **bold** for emphasis on important points
+- Use > blockquotes for highlighting key information
+- Use proper table formatting for structured data
+- Use code blocks with \`\`\` for code examples
+- Use horizontal rules --- for section separators when appropriate
+
 Use this information to:
 - Understand the scope and context of the work
 - Identify dependencies and relationships
@@ -1099,7 +1110,21 @@ Be conversational, helpful, and concise in your responses. Frame your answers in
     }
     
     // Final instruction for the LLM
-    prompt += `\n\nRespond to the user's questions with helpful, actionable insights based on this work item context. If the user asks about something that's not in this context, you can answer based on your general knowledge of Agile and Azure DevOps best practices, but make it clear when you're doing so. Remember to always respond in ${language} language.`;
+    prompt += `\n\n## RESPONSE GUIDELINES
+Respond to the user's questions with helpful, actionable insights based on this work item context. 
+If the user asks about something that's not in this context, you can answer based on your general 
+knowledge of Agile and Azure DevOps best practices, but make it clear when you're doing so.
+
+ALWAYS USE RICH MARKDOWN FORMATTING in your responses:
+- Use # for main titles and ## for section headers
+- Use proper bullet points and numbered lists
+- Use **bold** for emphasis on important points
+- Format code with proper code blocks using \`\`\`
+- Use tables for structured data where appropriate
+- Use blockquotes (>) for highlighting key information
+- Use horizontal rules (---) to separate major sections
+
+Remember to always respond in ${language} language.`;
     
     return prompt;
   }

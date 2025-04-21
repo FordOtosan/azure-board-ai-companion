@@ -192,7 +192,14 @@ export class AiBotLlmApiService {
                 if (textMatches) {
                   for (const match of textMatches) {
                     try {
-                      const text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      // Extract text and trim leading space that might be causing formatting issues
+                      let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      
+                      // Only trim leading space if this isn't the first chunk
+                      if (fullResponse.length > 0 && text.startsWith(' ')) {
+                        text = text.substring(1);
+                      }
+                      
                       if (text) {
                         fullResponse += text;
                         onChunk(text);
@@ -206,13 +213,58 @@ export class AiBotLlmApiService {
                 }
               }
               
-              // If buffer is getting too large, clear it to prevent memory issues
-              if (buffer.length > 10000) {
-                console.warn("Buffer too large, clearing");
-                return "";
+              // Third try: if still no content, look for any text between quotes after "text":
+              if (!foundValidContent) {
+                const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
+                if (directTextMatch && directTextMatch[1]) {
+                  // Extract text and trim leading space that might be causing formatting issues
+                  let text = directTextMatch[1];
+                  
+                  // Only trim leading space if this isn't the first chunk
+                  if (fullResponse.length > 0 && text.startsWith(' ')) {
+                    text = text.substring(1);
+                  }
+                  
+                  fullResponse += text;
+                  onChunk(text);
+                  foundValidContent = true;
+                  console.log(`Extracted direct text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                }
               }
               
-              return buffer;
+              // Fourth try: desperate attempt to find any text content
+              if (!foundValidContent && buffer.includes('"text"')) {
+                try {
+                  // Get everything after "text":
+                  const textSection = buffer.split('"text":')[1];
+                  if (textSection) {
+                    // Try to extract the content between the first set of quotes
+                    const quoteMatch = textSection.match(/"([^"]*)"/);
+                    if (quoteMatch && quoteMatch[1]) {
+                      // Extract text and trim leading space that might be causing formatting issues
+                      let text = quoteMatch[1];
+                      
+                      // Only trim leading space if this isn't the first chunk
+                      if (fullResponse.length > 0 && text.startsWith(' ')) {
+                        text = text.substring(1);
+                      }
+                      
+                      fullResponse += text;
+                      onChunk(text);
+                      foundValidContent = true;
+                      console.log(`Last resort text extraction: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Failed in emergency text extraction:", e);
+                }
+              }
+              
+              if (!foundValidContent) {
+                console.warn("No valid content found in buffer");
+              }
+              
+              return foundValidContent;
             };
             
             // Function to clean buffer by removing processed data
@@ -492,7 +544,14 @@ export class AiBotLlmApiService {
                 if (textMatches) {
                   for (const match of textMatches) {
                     try {
-                      const text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      // Extract text and trim leading space that might be causing formatting issues
+                      let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      
+                      // Only trim leading space if this isn't the first chunk
+                      if (fullResponse.length > 0 && text.startsWith(' ')) {
+                        text = text.substring(1);
+                      }
+                      
                       if (text) {
                         fullResponse += text;
                         onChunk(text);
@@ -510,7 +569,14 @@ export class AiBotLlmApiService {
               if (!foundValidContent) {
                 const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
                 if (directTextMatch && directTextMatch[1]) {
-                  const text = directTextMatch[1];
+                  // Extract text and trim leading space that might be causing formatting issues
+                  let text = directTextMatch[1];
+                  
+                  // Only trim leading space if this isn't the first chunk
+                  if (fullResponse.length > 0 && text.startsWith(' ')) {
+                    text = text.substring(1);
+                  }
+                  
                   fullResponse += text;
                   onChunk(text);
                   foundValidContent = true;
@@ -527,7 +593,14 @@ export class AiBotLlmApiService {
                     // Try to extract the content between the first set of quotes
                     const quoteMatch = textSection.match(/"([^"]*)"/);
                     if (quoteMatch && quoteMatch[1]) {
-                      const text = quoteMatch[1];
+                      // Extract text and trim leading space that might be causing formatting issues
+                      let text = quoteMatch[1];
+                      
+                      // Only trim leading space if this isn't the first chunk
+                      if (fullResponse.length > 0 && text.startsWith(' ')) {
+                        text = text.substring(1);
+                      }
+                      
                       fullResponse += text;
                       onChunk(text);
                       foundValidContent = true;
@@ -722,5 +795,11 @@ export class AiBotLlmApiService {
       onError(error instanceof Error ? error : new Error('Unknown error occurred'));
       return Promise.reject(error);
     }
+  }
+
+  // Add this function near the processing related functions to handle markdown preservation
+  static preserveMarkdownFormatting(text: string): string {
+    // Don't escape or process characters that are part of markdown syntax
+    return text;
   }
 } 
