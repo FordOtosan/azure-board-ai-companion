@@ -46,6 +46,9 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
   const abortControllerRef = useRef<AbortController | null>(null);
   const responseAccumulatorRef = useRef<string>('');
   
+  // Add a ref to store the streaming message ID to avoid race conditions
+  const streamingMessageIdRef = useRef<string | number | null>(null);
+  
   // Get work item context for the initial prompt
   const { currentWorkItem, parentWorkItem, childWorkItems, isLoading: isWorkItemLoading } = useContext(WorkItemContext);
   
@@ -134,8 +137,12 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
 
   // Handle stream complete
   const handleStreamComplete = (fullResponse: string) => {
-    console.log("Original Stream complete called with streamingMessageId:", streamingMessageId);
-    if (streamingMessageId === null) {
+    console.log("Original Stream complete called with streamingMessageId ref:", streamingMessageIdRef.current);
+    
+    // Use the ref instead of the state to avoid race conditions
+    const currentStreamingId = streamingMessageIdRef.current;
+    
+    if (currentStreamingId === null) {
       console.log("Skipping stream complete due to null streamingMessageId - forcing isLoading reset");
       // Even if streamingMessageId is null, we should still reset isLoading
       setIsLoading(false);
@@ -147,26 +154,31 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     
     // Update the final message with the complete response
     setMessages(prevMessages => {
-      const lastMessage = prevMessages[prevMessages.length - 1];
-      if (lastMessage.id === streamingMessageId) {
-        return prevMessages.map(msg =>
-          msg.id === streamingMessageId
-            ? { ...msg, content: formattedResponse, isStreaming: false }
-            : msg
-        );
+      // Find if there's already a message with this ID
+      const messageToUpdate = prevMessages.find(msg => msg.id === currentStreamingId);
+      
+      if (!messageToUpdate) {
+        console.error(`Message with ID ${currentStreamingId} not found in state during completion`);
+        return [
+          ...prevMessages,
+          {
+            id: currentStreamingId,
+            role: 'assistant',
+            content: formattedResponse,
+            isStreaming: false
+          }
+        ];
       }
-      return [
-        ...prevMessages,
-        {
-          id: streamingMessageId,
-          role: 'assistant',
-          content: formattedResponse,
-          isStreaming: false
-        }
-      ];
+      
+      return prevMessages.map(msg =>
+        msg.id === currentStreamingId
+          ? { ...msg, content: formattedResponse, isStreaming: false }
+          : msg
+      );
     });
     
     // Reset all streaming and loading states
+    streamingMessageIdRef.current = null;
     setStreamingMessageId(null);
     console.log("Setting isLoading to false");
     setIsLoading(false);
@@ -182,37 +194,53 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     if (abortControllerRef.current) {
       abortControllerRef.current = null;
     }
-
-    // Force re-render to ensure UI update
-    setTimeout(() => {
-      console.log("After stream complete - isLoading:", isLoading);
-    }, 0);
   };
 
   // Handle stream error
   const handleStreamError = (error: Error) => {
     console.error('Streaming error:', error);
     
-    if (streamingMessageId === null) return;
+    // Use the ref instead of the state to avoid race conditions
+    const currentStreamingId = streamingMessageIdRef.current;
     
     // Ensure error message has proper newlines
     const errorMessage = `Error: ${error.message}. Please try again.`.replace(/\\n/g, '\n');
     
-    setMessages(prevMessages => [
-      ...prevMessages,
-      {
-        id: Date.now(),
-        role: 'assistant',
-        content: errorMessage,
-        isStreaming: false
-      }
-    ]);
+    if (currentStreamingId) {
+      // Update the existing streaming message with the error
+      setMessages(prevMessages => prevMessages.map(msg => 
+        msg.id === currentStreamingId
+          ? { 
+              ...msg, 
+              content: errorMessage,
+              isStreaming: false 
+            }
+          : msg
+      ));
+    } else {
+      // If there's no streaming message (unlikely), create a new error message
+      setMessages(prevMessages => [
+        ...prevMessages,
+        {
+          id: Date.now(),
+          role: 'assistant',
+          content: errorMessage,
+          isStreaming: false
+        }
+      ]);
+    }
     
+    // Reset all streaming and loading states
+    streamingMessageIdRef.current = null;
     setStreamingMessageId(null);
     console.log("Setting isLoading to false on error");
     setIsLoading(false);
     responseAccumulatorRef.current = '';
-    abortControllerRef.current = null;
+    
+    // Clear abort controller
+    if (abortControllerRef.current) {
+      abortControllerRef.current = null;
+    }
   };
 
   // Handle stop generation
@@ -222,15 +250,21 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       
-      if (streamingMessageId !== null) {
+      // Use the ref to access the streaming message ID
+      const currentStreamingId = streamingMessageIdRef.current;
+      
+      if (currentStreamingId !== null) {
+        // Mark the message as no longer streaming
         setMessages(prevMessages =>
           prevMessages.map(msg =>
-            msg.id === streamingMessageId
+            msg.id === currentStreamingId
               ? { ...msg, isStreaming: false }
               : msg
           )
         );
         
+        // Clear streaming state
+        streamingMessageIdRef.current = null;
         setStreamingMessageId(null);
         console.log("Setting isLoading to false after manual stop");
         setIsLoading(false);
@@ -280,7 +314,11 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     try {
       console.log("Starting message generation - setting isLoading to true");
       setIsLoading(true);
+      
+      // Set both the state and ref for the streaming message ID
       setStreamingMessageId(responseMessageId);
+      streamingMessageIdRef.current = responseMessageId;
+      
       responseAccumulatorRef.current = '';
       
       // ALWAYS generate a fresh work item context for each message to ensure it's included
@@ -425,12 +463,18 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       return;
     }
     
-    if (streamingMessageId === null) {
+    // Use the ref instead of the state to avoid race conditions
+    const currentStreamingId = streamingMessageIdRef.current;
+    
+    if (currentStreamingId === null) {
       console.log("Setting streamingMessageId to new id");
       
       // Generate a new ID for the streaming message
       const newId = Date.now();
+      
+      // Update both the state and ref
       setStreamingMessageId(newId);
+      streamingMessageIdRef.current = newId;
       
       // Start accumulating the content
       responseAccumulatorRef.current = content;
@@ -451,8 +495,16 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       responseAccumulatorRef.current += content;
       
       setMessages(prevMessages => {
+        // Find the message to update first to prevent race conditions
+        const messageToUpdate = prevMessages.find(msg => msg.id === currentStreamingId);
+        
+        if (!messageToUpdate) {
+          console.error(`Message with ID ${currentStreamingId} not found in state`);
+          return prevMessages;
+        }
+        
         return prevMessages.map(msg =>
-          msg.id === streamingMessageId
+          msg.id === currentStreamingId
             ? { ...msg, content: responseAccumulatorRef.current }
             : msg
         );
@@ -505,6 +557,7 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     });
     
     // Reset all streaming and loading states
+    streamingMessageIdRef.current = null;
     setStreamingMessageId(null);
     console.log("Setting isLoading to false (handleStreamCompleteWithId)");
     setIsLoading(false);
