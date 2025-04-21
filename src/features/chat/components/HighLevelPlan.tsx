@@ -38,12 +38,15 @@ export const HighLevelPlan: React.FC<HighLevelPlanProps> = ({
     .replace('##HIGHLEVELTESTPLAN##', '')
     .trim();
 
+  // Check if this is a test plan (either by prop or content)
+  const isTestPlan = planType === 'test' || content.includes('##HIGHLEVELTESTPLAN##');
+
   // Determine label and button text based on plan type
-  const chipLabel = planType === 'test' ? T.highLevelTestPlan : T.highLevelPlan;
-  const buttonText = planType === 'test' ? T.useTestPlan : T.usePlan;
+  const chipLabel = isTestPlan ? T.highLevelTestPlan : T.highLevelPlan;
+  const buttonText = isTestPlan ? T.useTestPlan : T.usePlan;
   
-  // Use different color for test plan
-  const chipColor = planType === 'test' ? "secondary" : "primary";
+  // Always use secondary color for test plans and primary for regular plans
+  const chipColor = isTestPlan ? "secondary" : "primary";
 
   return (
     <Box sx={{ 
@@ -80,14 +83,14 @@ export const HighLevelPlan: React.FC<HighLevelPlanProps> = ({
       <Button
         variant="contained"
         color={chipColor}
-        size={planType === 'test' ? "medium" : "small"}
+        size={isTestPlan ? "medium" : "small"}
         onClick={onUsePlan}
         sx={{ 
-          width: planType === 'test' ? '100%' : 'auto',
+          width: isTestPlan ? '100%' : 'auto',
           borderRadius: 1,
-          py: planType === 'test' ? 1.5 : 1,
-          fontWeight: planType === 'test' ? 'bold' : 'medium',
-          textTransform: planType === 'test' ? 'uppercase' : 'none'
+          py: isTestPlan ? 1.5 : 1,
+          fontWeight: isTestPlan ? 'bold' : 'medium',
+          textTransform: isTestPlan ? 'uppercase' : 'none'
         }}
       >
         {buttonText}

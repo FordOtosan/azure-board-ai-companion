@@ -11,6 +11,7 @@ export interface TestPlan {
 export interface TestSuite {
   name: string;
   testCases: TestCase[];
+  testSuites?: TestSuite[]; // Support for nested test suites
 }
 
 // Test Case structure
@@ -73,6 +74,7 @@ export interface TestSuiteCreationResult {
   name: string;
   url: string;
   testCases: TestCaseCreationResult[];
+  testSuites?: TestSuiteCreationResult[]; // Support for nested test suites
 }
 
 // Test Case creation result
