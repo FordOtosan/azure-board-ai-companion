@@ -1,6 +1,7 @@
 import { Paper } from '@mui/material';
 import * as React from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 
 interface MessagePart {
@@ -32,11 +33,15 @@ const MessageContent: React.FC<MessageContentProps> = ({ parts, isUser }) => {
       );
   };
 
-  // Join all parts, ensuring we don't lose any content
-  const content = parts
-    .filter(part => part !== null && part !== undefined)
-    .map(part => processText(part.text))
-    .join('');
+  // Combine all parts into a single string, handling potential undefined and null values
+  const content = React.useMemo(() => {
+    if (!parts || parts.length === 0) return '';
+    
+    return parts
+      .filter(part => part !== null && part !== undefined)
+      .map(part => processText(part.text))
+      .join('');
+  }, [parts]);
 
   return (
     <Paper 
@@ -48,9 +53,10 @@ const MessageContent: React.FC<MessageContentProps> = ({ parts, isUser }) => {
         bgcolor: isUser ? 'primary.main' : 'grey.100',
         color: isUser ? 'white' : 'text.primary',
         borderRadius: 2,
+        overflow: 'hidden',
       }}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+      <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>
         {content}
       </ReactMarkdown>
     </Paper>

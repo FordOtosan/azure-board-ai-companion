@@ -516,15 +516,8 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
   const handleStreamCompleteWithId = (fullResponse: string, messageId: string | number) => {
     console.log("Stream complete with specific ID:", messageId);
     
-    // Ensure newlines are properly formatted
-    let formattedResponse = fullResponse.replace(/\\n/g, '\n');
-    
-    // Check if the response ends abruptly (mid-sentence) and add a period if needed
-    const lastChar = formattedResponse.trim().slice(-1);
-    if (!/[.!?:;,)]/.test(lastChar) && formattedResponse.length > 10) {
-      console.log("Response appears to end abruptly, adding a period");
-      formattedResponse = formattedResponse.trim() + ".";
-    }
+    // We don't need to replace newlines or add periods - this preserves Markdown formatting
+    // Let the fullResponse be used directly without modification
     
     // Update the message with the complete response
     setMessages(prevMessages => {
@@ -538,7 +531,7 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
         console.log("Completing existing assistant message at index:", assistantMessageIndex);
         return prevMessages.map((msg, index) =>
           index === assistantMessageIndex
-            ? { ...msg, id: messageId, content: formattedResponse, isStreaming: false }
+            ? { ...msg, id: messageId, content: fullResponse, isStreaming: false }
             : msg
         );
       } else {
@@ -549,7 +542,7 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
           {
             id: messageId,
             role: 'assistant',
-            content: formattedResponse,
+            content: fullResponse,
             isStreaming: false
           }
         ];
@@ -566,7 +559,7 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     // Update LLM history
     setLlmHistory(prevHistory => [
       ...prevHistory,
-      { role: 'assistant' as const, content: formattedResponse }
+      { role: 'assistant' as const, content: fullResponse }
     ]);
     
     // Clear abort controller
