@@ -33,6 +33,9 @@ export class AiBotLlmApiService {
       onError(new Error("LLM provider, API URL, or API Token not configured correctly."));
       return Promise.reject(new Error("Invalid LLM configuration"));
     }
+    
+    // Reset the text buffer at the start of a new stream request
+    this._textBuffer = '';
 
     let requestUrl = config.apiUrl;
     let requestBody: any;
@@ -155,8 +158,8 @@ export class AiBotLlmApiService {
 
             // Function to process buffered data and extract JSON objects
             const processBufferedData = (buffer: string) => {
-              // Log raw buffer for debugging
-              console.debug("Processing buffer:", buffer.substring(0, 100) + (buffer.length > 100 ? "..." : ""));
+              // Log raw buffer for debugging (truncated to avoid huge logs)
+              // console.debug("Processing buffer:", buffer.substring(0, 100) + (buffer.length > 100 ? "..." : ""));
               
               let foundValidContent = false;
               
@@ -171,9 +174,9 @@ export class AiBotLlmApiService {
                   if (match) {
                     const data = JSON.parse(match[1]);
                     
-                    // Extract content if available
+                    // Extract content if available - use our preserveMarkdownFormatting function
                     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                      const text = data.candidates[0].content.parts[0].text;
+                      const text = this.preserveMarkdownFormatting(data.candidates[0].content.parts[0].text);
                       fullResponse += text;
                       onChunk(text);
                       foundValidContent = true;
@@ -194,6 +197,9 @@ export class AiBotLlmApiService {
                     try {
                       // Extract text and trim leading space that might be causing formatting issues
                       let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      
+                      // Use our preserveMarkdownFormatting function
+                      text = this.preserveMarkdownFormatting(text);
                       
                       // Only trim leading space if this isn't the first chunk
                       if (fullResponse.length > 0 && text.startsWith(' ')) {
@@ -220,6 +226,9 @@ export class AiBotLlmApiService {
                   // Extract text and trim leading space that might be causing formatting issues
                   let text = directTextMatch[1];
                   
+                  // Use our preserveMarkdownFormatting function
+                  text = this.preserveMarkdownFormatting(text);
+                  
                   // Only trim leading space if this isn't the first chunk
                   if (fullResponse.length > 0 && text.startsWith(' ')) {
                     text = text.substring(1);
@@ -243,6 +252,9 @@ export class AiBotLlmApiService {
                     if (quoteMatch && quoteMatch[1]) {
                       // Extract text and trim leading space that might be causing formatting issues
                       let text = quoteMatch[1];
+                      
+                      // Use our preserveMarkdownFormatting function
+                      text = this.preserveMarkdownFormatting(text);
                       
                       // Only trim leading space if this isn't the first chunk
                       if (fullResponse.length > 0 && text.startsWith(' ')) {
@@ -523,9 +535,9 @@ export class AiBotLlmApiService {
                   if (match) {
                     const data = JSON.parse(match[1]);
                     
-                    // Extract content if available
+                    // Extract content if available - use our preserveMarkdownFormatting function
                     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                      const text = data.candidates[0].content.parts[0].text;
+                      const text = this.preserveMarkdownFormatting(data.candidates[0].content.parts[0].text);
                       fullResponse += text;
                       onChunk(text);
                       foundValidContent = true;
@@ -546,6 +558,9 @@ export class AiBotLlmApiService {
                     try {
                       // Extract text and trim leading space that might be causing formatting issues
                       let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      
+                      // Use our preserveMarkdownFormatting function
+                      text = this.preserveMarkdownFormatting(text);
                       
                       // Only trim leading space if this isn't the first chunk
                       if (fullResponse.length > 0 && text.startsWith(' ')) {
@@ -572,6 +587,9 @@ export class AiBotLlmApiService {
                   // Extract text and trim leading space that might be causing formatting issues
                   let text = directTextMatch[1];
                   
+                  // Use our preserveMarkdownFormatting function
+                  text = this.preserveMarkdownFormatting(text);
+                  
                   // Only trim leading space if this isn't the first chunk
                   if (fullResponse.length > 0 && text.startsWith(' ')) {
                     text = text.substring(1);
@@ -595,6 +613,9 @@ export class AiBotLlmApiService {
                     if (quoteMatch && quoteMatch[1]) {
                       // Extract text and trim leading space that might be causing formatting issues
                       let text = quoteMatch[1];
+                      
+                      // Use our preserveMarkdownFormatting function
+                      text = this.preserveMarkdownFormatting(text);
                       
                       // Only trim leading space if this isn't the first chunk
                       if (fullResponse.length > 0 && text.startsWith(' ')) {
@@ -682,6 +703,9 @@ export class AiBotLlmApiService {
       onError(new Error('No LLM configuration available'));
       return Promise.reject(new Error('No LLM configuration available'));
     }
+    
+    // Reset the text buffer at the start of a new stream request
+    this._textBuffer = '';
     
     console.log("DEBUG - streamChatToLlm received message history:", JSON.stringify(messageHistory));
 
@@ -776,6 +800,23 @@ export class AiBotLlmApiService {
     
     // Define custom complete handler
     const completeHandler: StreamCompleteCallback = (finalContent) => {
+      // Check if there's any remaining buffered content
+      if (this._textBuffer && this._textBuffer.length > 0) {
+        console.log(`Flushing remaining buffered content: "${this._textBuffer}"`);
+        
+        // Send any remaining buffered text as a final chunk
+        onChunk(this._textBuffer);
+        
+        // Add to accumulated response for Gemini
+        if (isGemini) {
+          accumulatedResponse += this._textBuffer;
+          finalContent += this._textBuffer;
+        }
+        
+        // Clear buffer
+        this._textBuffer = '';
+      }
+      
       // Make sure we pass the final accumulated content
       onComplete(isGemini ? accumulatedResponse : finalContent);
     };
@@ -799,7 +840,38 @@ export class AiBotLlmApiService {
 
   // Add this function near the processing related functions to handle markdown preservation
   static preserveMarkdownFormatting(text: string): string {
-    // Don't escape or process characters that are part of markdown syntax
+    // For Gemini API specifically, we need to handle small text fragments better
+    // These are often parts of sentences split mid-word or at awkward places
+    
+    // Don't return tiny text fragments that are less than 3 characters,
+    // unless they contain newlines or markdown formatting
+    if (text.length < 3 && 
+        !text.includes('\n') && 
+        !text.match(/[*_#>`\[\]]/)) {
+      console.log(`Buffering tiny fragment: "${text}"`);
+      
+      // Store this small fragment for the next chunk
+      if (!this._textBuffer) {
+        this._textBuffer = '';
+      }
+      this._textBuffer += text;
+      
+      // Return empty string so no update happens
+      return '';
+    }
+    
+    // If we have buffered text, prepend it to the current text
+    if (this._textBuffer) {
+      console.log(`Combining buffered text "${this._textBuffer}" with "${text.substring(0, 20)}..."`);
+      const combinedText = this._textBuffer + text;
+      this._textBuffer = '';
+      return combinedText;
+    }
+    
+    // Return the text as-is for normal-sized chunks
     return text;
   }
+  
+  // Static buffer for accumulating small text fragments
+  private static _textBuffer: string = '';
 } 

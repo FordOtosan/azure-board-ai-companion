@@ -419,12 +419,21 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
 
   // Update streaming message with new content
   const updateStreamingMessage = (content: string) => {
+    // Skip empty chunks
+    if (!content || content.length === 0) {
+      console.log("Skipping empty content chunk");
+      return;
+    }
+    
     if (streamingMessageId === null) {
       console.log("Setting streamingMessageId to new id");
       
       // Generate a new ID for the streaming message
       const newId = Date.now();
       setStreamingMessageId(newId);
+      
+      // Start accumulating the content
+      responseAccumulatorRef.current = content;
       
       // Add a new streaming message
       setMessages(prevMessages => [
@@ -456,7 +465,14 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     console.log("Stream complete with specific ID:", messageId);
     
     // Ensure newlines are properly formatted
-    const formattedResponse = fullResponse.replace(/\\n/g, '\n');
+    let formattedResponse = fullResponse.replace(/\\n/g, '\n');
+    
+    // Check if the response ends abruptly (mid-sentence) and add a period if needed
+    const lastChar = formattedResponse.trim().slice(-1);
+    if (!/[.!?:;,)]/.test(lastChar) && formattedResponse.length > 10) {
+      console.log("Response appears to end abruptly, adding a period");
+      formattedResponse = formattedResponse.trim() + ".";
+    }
     
     // Update the message with the complete response
     setMessages(prevMessages => {
