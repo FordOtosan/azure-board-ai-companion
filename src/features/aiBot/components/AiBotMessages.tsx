@@ -1,5 +1,16 @@
-import { ContentCopy } from '@mui/icons-material';
-import { Box, IconButton, Paper, Tooltip, Typography, useTheme } from '@mui/material';
+import { Assignment, ContentCopy, Numbers } from '@mui/icons-material';
+import {
+    Box,
+    Button,
+    IconButton,
+    Modal,
+    Paper,
+    Popover,
+    TextField,
+    Tooltip,
+    Typography,
+    useTheme
+} from '@mui/material';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
@@ -17,11 +28,21 @@ interface AiBotMessagesProps {
 const messagesTranslations = {
   en: {
     copy: 'Copy message',
-    copied: 'Copied!'
+    copied: 'Copied!',
+    useContent: 'Use content',
+    useAsTitle: 'Use as Title',
+    useAsDescription: 'Use as Description',
+    useAsAcceptanceCriteria: 'Use as Acceptance Criteria',
+    useAsStoryPoint: 'Use as Story Point'
   },
   tr: {
     copy: 'Mesajı kopyala',
-    copied: 'Kopyalandı!'
+    copied: 'Kopyalandı!',
+    useContent: 'İçeriği kullan',
+    useAsTitle: 'Başlık olarak kullan',
+    useAsDescription: 'Açıklama olarak kullan',
+    useAsAcceptanceCriteria: 'Kabul kriterleri olarak kullan',
+    useAsStoryPoint: 'Story Point olarak kullan'
   }
 };
 
@@ -29,6 +50,14 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [copiedId, setCopiedId] = useState<string | number | null>(null);
+  
+  // New state for content modal
+  const [contentModalOpen, setContentModalOpen] = useState(false);
+  const [selectedContent, setSelectedContent] = useState("");
+  
+  // State for story point popover
+  const [storyPointAnchorEl, setStoryPointAnchorEl] = useState<HTMLElement | null>(null);
+  const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   
   const theme = useTheme();
   const T = messagesTranslations[currentLanguage];
@@ -49,6 +78,115 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
     } catch (error) {
       console.error('Failed to copy:', error);
     }
+  };
+  
+  // Handle opening the content modal
+  const handleOpenContentModal = (content: string) => {
+    setSelectedContent(content);
+    setContentModalOpen(true);
+  };
+  
+  // Handle closing the content modal
+  const handleCloseContentModal = () => {
+    setContentModalOpen(false);
+  };
+  
+  // Handle using content for different purposes
+  const handleUseContent = (type: 'title' | 'description' | 'acceptanceCriteria') => {
+    // Just log for now, would integrate with work item functionality in a real implementation
+    console.log(`Using content as ${type}:`, selectedContent);
+    
+    // In a real implementation, this would send the content to the work item field
+    // For example: WorkItemService.setField(type, selectedContent);
+    
+    // Create a custom event that can be listened for by other components
+    const event = new CustomEvent('useContent', {
+      detail: {
+        type,
+        content: selectedContent
+      }
+    });
+    document.dispatchEvent(event);
+    
+    // Close the modal
+    handleCloseContentModal();
+  };
+  
+  // Handle number click for story points
+  const handleNumberClick = (event: React.MouseEvent<HTMLElement>, number: number) => {
+    setSelectedNumber(number);
+    setStoryPointAnchorEl(event.currentTarget);
+  };
+  
+  // Handle story point selection
+  const handleUseAsStoryPoint = () => {
+    if (selectedNumber !== null) {
+      console.log(`Using ${selectedNumber} as story point`);
+      
+      // Create a custom event
+      const event = new CustomEvent('useStoryPoint', {
+        detail: {
+          value: selectedNumber
+        }
+      });
+      document.dispatchEvent(event);
+      
+      // Close the popover
+      handleCloseStoryPointPopover();
+    }
+  };
+  
+  // Handle closing the story point popover
+  const handleCloseStoryPointPopover = () => {
+    setStoryPointAnchorEl(null);
+    setSelectedNumber(null);
+  };
+  
+  // Check if the story point popover is open
+  const storyPointPopoverOpen = Boolean(storyPointAnchorEl);
+  
+  // Function to render message content with clickable numbers
+  const renderMessageWithClickableNumbers = (content: string) => {
+    // Regular expression to find numbers between 0 and 100
+    const numberRegex = /\b([0-9]|[1-9][0-9]|100)\b/g;
+    
+    // Split the content by the regex to get parts and numbers
+    const parts = content.split(numberRegex);
+    const numbers = content.match(numberRegex) || [];
+    
+    // Build the result by alternating parts and number buttons
+    const result: React.ReactNode[] = [];
+    
+    parts.forEach((part, index) => {
+      // Add the text part
+      result.push(<span key={`part-${index}`}>{part}</span>);
+      
+      // Add the number button if there is one at this position
+      if (index < numbers.length) {
+        const number = parseInt(numbers[index], 10);
+        result.push(
+          <Button
+            key={`number-${index}`}
+            variant="outlined"
+            size="small"
+            onClick={(e) => handleNumberClick(e, number)}
+            sx={{
+              minWidth: 'auto',
+              padding: '0px 4px',
+              margin: '0 2px',
+              lineHeight: 1,
+              height: '20px',
+              fontSize: '0.75rem',
+              borderRadius: '10px'
+            }}
+          >
+            {number}
+          </Button>
+        );
+      }
+    });
+    
+    return result;
   };
 
   // Define custom components for ReactMarkdown
@@ -313,7 +451,23 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
                 {msg.role === 'assistant' ? (
                   <ReactMarkdown 
                     remarkPlugins={[remarkGfm, remarkBreaks]}
-                    components={markdownComponents}
+                    components={{
+                      ...markdownComponents,
+                      // Override p to make numbers clickable
+                      p: ({ children, ...props }: any) => {
+                        // Check if the content is a string and has numbers
+                        const content = String(children);
+                        if (content.match(/\b([0-9]|[1-9][0-9]|100)\b/g)) {
+                          return (
+                            <Box component="p" sx={{ my: 1, lineHeight: 1.6 }}>
+                              {renderMessageWithClickableNumbers(content)}
+                            </Box>
+                          );
+                        }
+                        // Otherwise use the default paragraph component
+                        return markdownComponents.p({ children, ...props });
+                      }
+                    }}
                   >
                     {msg.content}
                   </ReactMarkdown>
@@ -328,13 +482,16 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
               </Box>
             </Paper>
             
-            {/* Copy button - only for assistant messages */}
+            {/* Action buttons - only for assistant messages */}
             {msg.content && !msg.isStreaming && msg.role === 'assistant' && (
               <Box sx={{ 
                 display: 'flex',
+                flexDirection: 'column',
                 alignItems: 'center',
+                gap: 0.5,
                 mx: 1,
               }}>
+                {/* Copy button */}
                 <Tooltip title={copiedId === msg.id ? T.copied : T.copy}>
                   <IconButton
                     size="small"
@@ -350,12 +507,123 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
                     <ContentCopy fontSize="small" />
                   </IconButton>
                 </Tooltip>
+                
+                {/* Use content button */}
+                <Tooltip title={T.useContent}>
+                  <IconButton
+                    size="small"
+                    onClick={() => handleOpenContentModal(msg.content)}
+                    sx={{
+                      opacity: 0.6,
+                      color: theme.palette.text.secondary,
+                      '&:hover': {
+                        opacity: 1,
+                      },
+                    }}
+                  >
+                    <Assignment fontSize="small" />
+                  </IconButton>
+                </Tooltip>
               </Box>
             )}
           </Box>
         ))}
       
       <div ref={messagesEndRef} />
+      
+      {/* Content Modal */}
+      <Modal
+        open={contentModalOpen}
+        onClose={handleCloseContentModal}
+        aria-labelledby="modal-title"
+        aria-describedby="modal-description"
+      >
+        <Box sx={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          width: '80%',
+          maxWidth: 600,
+          bgcolor: 'background.paper',
+          boxShadow: 24,
+          p: 4,
+          borderRadius: 2,
+        }}>
+          <Typography id="modal-title" variant="h6" component="h2" sx={{ mb: 2 }}>
+            {T.useContent}
+          </Typography>
+          
+          <TextField
+            fullWidth
+            multiline
+            rows={8}
+            value={selectedContent}
+            onChange={(e) => setSelectedContent(e.target.value)}
+            variant="outlined"
+            sx={{ mb: 3 }}
+          />
+          
+          <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
+            <Button 
+              fullWidth 
+              variant="contained" 
+              onClick={() => handleUseContent('title')}
+              sx={{ textTransform: 'none' }}
+            >
+              {T.useAsTitle}
+            </Button>
+            
+            <Button 
+              fullWidth 
+              variant="contained" 
+              onClick={() => handleUseContent('description')}
+              sx={{ textTransform: 'none' }}
+            >
+              {T.useAsDescription}
+            </Button>
+            
+            <Button 
+              fullWidth 
+              variant="contained" 
+              onClick={() => handleUseContent('acceptanceCriteria')}
+              sx={{ textTransform: 'none' }}
+            >
+              {T.useAsAcceptanceCriteria}
+            </Button>
+          </Box>
+        </Box>
+      </Modal>
+      
+      {/* Story Point Popover */}
+      <Popover
+        open={storyPointPopoverOpen}
+        anchorEl={storyPointAnchorEl}
+        onClose={handleCloseStoryPointPopover}
+        anchorOrigin={{
+          vertical: 'bottom',
+          horizontal: 'center',
+        }}
+        transformOrigin={{
+          vertical: 'top',
+          horizontal: 'center',
+        }}
+      >
+        <Box sx={{ p: 2 }}>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            {selectedNumber}
+          </Typography>
+          
+          <Button 
+            variant="contained" 
+            size="small" 
+            onClick={handleUseAsStoryPoint}
+            startIcon={<Numbers />}
+          >
+            {T.useAsStoryPoint}
+          </Button>
+        </Box>
+      </Popover>
     </Box>
   );
 };
