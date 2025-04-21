@@ -124,6 +124,22 @@ export class AiBotLlmApiService {
                   }
                 }
                 
+                // Force a final flush of any buffered text fragments with a short delay
+                if (this._textBuffer && this._textBuffer.length > 0) {
+                  console.log(`Flushing final buffer content: "${this._textBuffer}"`);
+                  // Add the remaining buffer content directly to the full response
+                  fullResponse += this._textBuffer;
+                  // Send the remaining buffer as a chunk
+                  onChunk(this._textBuffer);
+                  // Clear the buffer
+                  this._textBuffer = '';
+                  // Clear any pending timer
+                  if (this._bufferTimer) {
+                    clearTimeout(this._bufferTimer);
+                    this._bufferTimer = null;
+                  }
+                }
+                
                 // Stream complete, call the complete callback
                 onComplete(fullResponse);
                 return Promise.resolve();
@@ -176,11 +192,20 @@ export class AiBotLlmApiService {
                     
                     // Extract content if available - use our preserveMarkdownFormatting function
                     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                      const text = this.preserveMarkdownFormatting(data.candidates[0].content.parts[0].text);
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Found valid content in JSON: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                      const text = data.candidates[0].content.parts[0].text;
+                      const processedText = this.preserveMarkdownFormatting(text);
+                      
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        fullResponse += processedText;
+                        onChunk(processedText);
+                        foundValidContent = true;
+                        console.log(`Found valid content in JSON: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
+                      }
                     }
                   }
                 } catch (e) {
@@ -198,19 +223,24 @@ export class AiBotLlmApiService {
                       // Extract text and trim leading space that might be causing formatting issues
                       let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
                       
-                      // Use our preserveMarkdownFormatting function
-                      text = this.preserveMarkdownFormatting(text);
+                      const processedText = this.preserveMarkdownFormatting(text);
                       
-                      // Only trim leading space if this isn't the first chunk
-                      if (fullResponse.length > 0 && text.startsWith(' ')) {
-                        text = text.substring(1);
-                      }
-                      
-                      if (text) {
-                        fullResponse += text;
-                        onChunk(text);
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        // Only trim leading space if this isn't the first chunk
+                        if (fullResponse.length > 0 && processedText.startsWith(' ')) {
+                          fullResponse += processedText.substring(1);
+                          onChunk(processedText.substring(1));
+                        } else {
+                          fullResponse += processedText;
+                          onChunk(processedText);
+                        }
                         foundValidContent = true;
-                        console.log(`Found content via regex: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                        console.log(`Found content via regex: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
                       }
                     } catch (e) {
                       // Ignore extraction errors
@@ -219,61 +249,10 @@ export class AiBotLlmApiService {
                 }
               }
               
-              // Third try: if still no content, look for any text between quotes after "text":
-              if (!foundValidContent) {
-                const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
-                if (directTextMatch && directTextMatch[1]) {
-                  // Extract text and trim leading space that might be causing formatting issues
-                  let text = directTextMatch[1];
-                  
-                  // Use our preserveMarkdownFormatting function
-                  text = this.preserveMarkdownFormatting(text);
-                  
-                  // Only trim leading space if this isn't the first chunk
-                  if (fullResponse.length > 0 && text.startsWith(' ')) {
-                    text = text.substring(1);
-                  }
-                  
-                  fullResponse += text;
-                  onChunk(text);
-                  foundValidContent = true;
-                  console.log(`Extracted direct text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-                }
-              }
-              
-              // Fourth try: desperate attempt to find any text content
-              if (!foundValidContent && buffer.includes('"text"')) {
-                try {
-                  // Get everything after "text":
-                  const textSection = buffer.split('"text":')[1];
-                  if (textSection) {
-                    // Try to extract the content between the first set of quotes
-                    const quoteMatch = textSection.match(/"([^"]*)"/);
-                    if (quoteMatch && quoteMatch[1]) {
-                      // Extract text and trim leading space that might be causing formatting issues
-                      let text = quoteMatch[1];
-                      
-                      // Use our preserveMarkdownFormatting function
-                      text = this.preserveMarkdownFormatting(text);
-                      
-                      // Only trim leading space if this isn't the first chunk
-                      if (fullResponse.length > 0 && text.startsWith(' ')) {
-                        text = text.substring(1);
-                      }
-                      
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Last resort text extraction: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-                    }
-                  }
-                } catch (e) {
-                  console.warn("Failed in emergency text extraction:", e);
-                }
-              }
-              
-              if (!foundValidContent) {
-                console.warn("No valid content found in buffer");
+              // If we found valid content but didn't flush anything, schedule a delayed flush 
+              // to ensure small fragments eventually get sent
+              if (foundValidContent && this._textBuffer && this._textBuffer.length > 0) {
+                this._scheduleBufferFlush(onChunk);
               }
               
               return foundValidContent;
@@ -492,6 +471,22 @@ export class AiBotLlmApiService {
                   }
                 }
                 
+                // Force a final flush of any buffered text fragments with a short delay
+                if (this._textBuffer && this._textBuffer.length > 0) {
+                  console.log(`Flushing final buffer content: "${this._textBuffer}"`);
+                  // Add the remaining buffer content directly to the full response
+                  fullResponse += this._textBuffer;
+                  // Send the remaining buffer as a chunk
+                  onChunk(this._textBuffer);
+                  // Clear the buffer
+                  this._textBuffer = '';
+                  // Clear any pending timer
+                  if (this._bufferTimer) {
+                    clearTimeout(this._bufferTimer);
+                    this._bufferTimer = null;
+                  }
+                }
+                
                 // Stream complete, call the complete callback
                 onComplete(fullResponse);
                 return Promise.resolve();
@@ -537,11 +532,20 @@ export class AiBotLlmApiService {
                     
                     // Extract content if available - use our preserveMarkdownFormatting function
                     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
-                      const text = this.preserveMarkdownFormatting(data.candidates[0].content.parts[0].text);
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Found valid content in JSON: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                      const text = data.candidates[0].content.parts[0].text;
+                      const processedText = this.preserveMarkdownFormatting(text);
+                      
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        fullResponse += processedText;
+                        onChunk(processedText);
+                        foundValidContent = true;
+                        console.log(`Found valid content in JSON: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
+                      }
                     }
                   }
                 } catch (e) {
@@ -559,19 +563,24 @@ export class AiBotLlmApiService {
                       // Extract text and trim leading space that might be causing formatting issues
                       let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
                       
-                      // Use our preserveMarkdownFormatting function
-                      text = this.preserveMarkdownFormatting(text);
+                      const processedText = this.preserveMarkdownFormatting(text);
                       
-                      // Only trim leading space if this isn't the first chunk
-                      if (fullResponse.length > 0 && text.startsWith(' ')) {
-                        text = text.substring(1);
-                      }
-                      
-                      if (text) {
-                        fullResponse += text;
-                        onChunk(text);
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        // Only trim leading space if this isn't the first chunk
+                        if (fullResponse.length > 0 && processedText.startsWith(' ')) {
+                          fullResponse += processedText.substring(1);
+                          onChunk(processedText.substring(1));
+                        } else {
+                          fullResponse += processedText;
+                          onChunk(processedText);
+                        }
                         foundValidContent = true;
-                        console.log(`Found content via regex: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                        console.log(`Found content via regex: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
                       }
                     } catch (e) {
                       // Ignore extraction errors
@@ -580,61 +589,10 @@ export class AiBotLlmApiService {
                 }
               }
               
-              // Third try: if still no content, look for any text between quotes after "text":
-              if (!foundValidContent) {
-                const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
-                if (directTextMatch && directTextMatch[1]) {
-                  // Extract text and trim leading space that might be causing formatting issues
-                  let text = directTextMatch[1];
-                  
-                  // Use our preserveMarkdownFormatting function
-                  text = this.preserveMarkdownFormatting(text);
-                  
-                  // Only trim leading space if this isn't the first chunk
-                  if (fullResponse.length > 0 && text.startsWith(' ')) {
-                    text = text.substring(1);
-                  }
-                  
-                  fullResponse += text;
-                  onChunk(text);
-                  foundValidContent = true;
-                  console.log(`Extracted direct text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-                }
-              }
-              
-              // Fourth try: desperate attempt to find any text content
-              if (!foundValidContent && buffer.includes('"text"')) {
-                try {
-                  // Get everything after "text":
-                  const textSection = buffer.split('"text":')[1];
-                  if (textSection) {
-                    // Try to extract the content between the first set of quotes
-                    const quoteMatch = textSection.match(/"([^"]*)"/);
-                    if (quoteMatch && quoteMatch[1]) {
-                      // Extract text and trim leading space that might be causing formatting issues
-                      let text = quoteMatch[1];
-                      
-                      // Use our preserveMarkdownFormatting function
-                      text = this.preserveMarkdownFormatting(text);
-                      
-                      // Only trim leading space if this isn't the first chunk
-                      if (fullResponse.length > 0 && text.startsWith(' ')) {
-                        text = text.substring(1);
-                      }
-                      
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Last resort text extraction: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-                    }
-                  }
-                } catch (e) {
-                  console.warn("Failed in emergency text extraction:", e);
-                }
-              }
-              
-              if (!foundValidContent) {
-                console.warn("No valid content found in buffer");
+              // If we found valid content but didn't flush anything, schedule a delayed flush 
+              // to ensure small fragments eventually get sent
+              if (foundValidContent && this._textBuffer && this._textBuffer.length > 0) {
+                this._scheduleBufferFlush(onChunk);
               }
               
               return foundValidContent;
@@ -840,38 +798,104 @@ export class AiBotLlmApiService {
 
   // Add this function near the processing related functions to handle markdown preservation
   static preserveMarkdownFormatting(text: string): string {
-    // For Gemini API specifically, we need to handle small text fragments better
-    // These are often parts of sentences split mid-word or at awkward places
+    // For Gemini API specifically, we need to handle small text fragments better by batching them
     
-    // Don't return tiny text fragments that are less than 3 characters,
-    // unless they contain newlines or markdown formatting
-    if (text.length < 3 && 
-        !text.includes('\n') && 
-        !text.match(/[*_#>`\[\]]/)) {
-      console.log(`Buffering tiny fragment: "${text}"`);
+    // Initialize the buffer if needed
+    if (!this._textBuffer) {
+      this._textBuffer = '';
+    }
+    
+    // Initialize the timer if needed
+    if (!this._bufferTimer) {
+      this._bufferTimer = null;
+    }
+    
+    // Add the current text to the buffer
+    this._textBuffer += text;
+    
+    // Don't send tiny fragments immediately
+    const isSmallFragment = text.length < 20;
+    const hasEnoughBufferedContent = this._textBuffer.length >= 60;
+    const isSentenceBreak = text.match(/[.!?:;]\s*$/);
+    const hasMarkdownFormatting = text.match(/[*_#>`\[\]]/);
+    const hasNewlines = text.includes('\n');
+    
+    // Don't send small fragments unless they have special formatting, end a sentence,
+    // or we've accumulated enough content
+    if (isSmallFragment && !isSentenceBreak && !hasNewlines && !hasMarkdownFormatting && !hasEnoughBufferedContent) {
+      console.log(`Buffering fragment: "${text}" (buffer now ${this._textBuffer.length} chars)`);
       
-      // Store this small fragment for the next chunk
-      if (!this._textBuffer) {
-        this._textBuffer = '';
+      // If we have a pending flush, clear it
+      if (this._bufferTimer) {
+        clearTimeout(this._bufferTimer);
       }
-      this._textBuffer += text;
       
-      // Return empty string so no update happens
+      // Always schedule a flush after a reasonable delay to ensure content isn't held too long
+      this._scheduleBufferFlush(this._lastChunkCallback, 250);
+      
+      // Return empty string so the chunk isn't sent yet
       return '';
     }
     
-    // If we have buffered text, prepend it to the current text
-    if (this._textBuffer) {
-      console.log(`Combining buffered text "${this._textBuffer}" with "${text.substring(0, 20)}..."`);
-      const combinedText = this._textBuffer + text;
+    // If we've accumulated content and have a natural break or enough content, send it
+    if (this._textBuffer.length > 0) {
+      console.log(`Sending buffered text: "${this._textBuffer.substring(0, 30)}..." (${this._textBuffer.length} chars)`);
+      
+      // Get the accumulated text
+      const bufferToSend = this._textBuffer;
+      
+      // Clear the buffer for future text
       this._textBuffer = '';
-      return combinedText;
+      
+      // Clear any pending buffer flush
+      if (this._bufferTimer) {
+        clearTimeout(this._bufferTimer);
+        this._bufferTimer = null;
+      }
+      
+      // Return the accumulated text
+      return bufferToSend;
     }
     
-    // Return the text as-is for normal-sized chunks
+    // Default case - return text as is
     return text;
   }
   
-  // Static buffer for accumulating small text fragments
+  // Static buffer for accumulating text fragments
   private static _textBuffer: string = '';
+  
+  // Timer for flushing the buffer after a delay
+  private static _bufferTimer: NodeJS.Timeout | null = null;
+  
+  // Keep track of the last chunk callback
+  private static _lastChunkCallback: StreamChunkCallback | null = null;
+  
+  // Helper method to flush the buffer after a delay
+  private static _scheduleBufferFlush(onChunk: StreamChunkCallback | null, delayMs: number = 100): void {
+    // Store the callback for future use
+    if (onChunk) {
+      this._lastChunkCallback = onChunk;
+    }
+    
+    // If no callback is available, we can't flush
+    if (!this._lastChunkCallback) {
+      console.warn("No chunk callback available to flush buffer");
+      return;
+    }
+    
+    // Clear any existing timer
+    if (this._bufferTimer) {
+      clearTimeout(this._bufferTimer);
+    }
+    
+    // Set a new timer to flush the buffer
+    this._bufferTimer = setTimeout(() => {
+      if (this._textBuffer && this._textBuffer.length > 0 && this._lastChunkCallback) {
+        console.log(`Flushing buffer after delay: "${this._textBuffer.substring(0, 30)}..." (${this._textBuffer.length} chars)`);
+        this._lastChunkCallback(this._textBuffer);
+        this._textBuffer = '';
+      }
+      this._bufferTimer = null;
+    }, delayMs);
+  }
 } 
