@@ -664,6 +664,7 @@ export class AiBotLlmApiService {
     
     // Reset the text buffer at the start of a new stream request
     this._textBuffer = '';
+    this._fullAccumulatedResponse = '';
     
     console.log("DEBUG - streamChatToLlm received message history:", JSON.stringify(messageHistory));
 
@@ -798,6 +799,21 @@ export class AiBotLlmApiService {
 
   // Add this function near the processing related functions to handle markdown preservation
   static preserveMarkdownFormatting(text: string): string {
+    // First, process escape sequences in the text
+    let processedText = text
+      // Handle common escape sequences
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\r/g, '\r')
+      // Handle JSON escapes (quotes, backslashes, etc)
+      .replace(/\\([\\/"'bfnrt])/g, '$1')
+      // Handle double backslashes that might remain
+      .replace(/\\\\/g, '\\')
+      // Handle unicode escape sequences
+      .replace(/\\u([0-9a-fA-F]{4})/g, (match, code) => 
+        String.fromCharCode(parseInt(code, 16))
+      );
+    
     // For Gemini API specifically, we need to handle small text fragments better by batching them
     
     // Initialize the buffer if needed
@@ -810,36 +826,47 @@ export class AiBotLlmApiService {
       this._bufferTimer = null;
     }
     
-    // Add the current text to the buffer
-    this._textBuffer += text;
+    // Add the current processed text to the buffer
+    this._textBuffer += processedText;
     
-    // Don't send tiny fragments immediately
-    const isSmallFragment = text.length < 20;
-    const hasEnoughBufferedContent = this._textBuffer.length >= 60;
-    const isSentenceBreak = text.match(/[.!?:;]\s*$/);
-    const hasMarkdownFormatting = text.match(/[*_#>`\[\]]/);
-    const hasNewlines = text.includes('\n');
+    // Set a maximum buffer size before automatic sending
+    const MAX_BUFFER_SIZE = 100;
     
-    // Don't send small fragments unless they have special formatting, end a sentence,
-    // or we've accumulated enough content
-    if (isSmallFragment && !isSentenceBreak && !hasNewlines && !hasMarkdownFormatting && !hasEnoughBufferedContent) {
-      console.log(`Buffering fragment: "${text}" (buffer now ${this._textBuffer.length} chars)`);
+    // Log the received text for debugging
+    console.log(`Received text chunk: "${processedText}" (${processedText.length} chars)`);
+    
+    // Always add to the global accumulated response
+    if (!this._fullAccumulatedResponse) {
+      this._fullAccumulatedResponse = '';
+    }
+    this._fullAccumulatedResponse += processedText;
+    
+    // Don't send fragments immediately in most cases, but batch them
+    const isVerySmallFragment = processedText.length < 10;
+    const hasEnoughBufferedContent = this._textBuffer.length >= MAX_BUFFER_SIZE;
+    const isSentenceBreak = Boolean(processedText.match(/[.!?:;]\s*$/));
+    const hasMarkdownFormatting = Boolean(processedText.match(/[*_#>`\[\]]/));
+    const hasNewlines = processedText.includes('\n');
+    
+    // Almost always buffer, except in specific cases
+    if (!hasEnoughBufferedContent && !isSentenceBreak && !hasNewlines && (isVerySmallFragment || !hasMarkdownFormatting)) {
+      console.log(`🔄 Buffering: "${processedText}" (buffer size: ${this._textBuffer.length}/${MAX_BUFFER_SIZE} chars)`);
       
-      // If we have a pending flush, clear it
+      // If we have a pending flush, clear it and set a new one
       if (this._bufferTimer) {
         clearTimeout(this._bufferTimer);
       }
       
-      // Always schedule a flush after a reasonable delay to ensure content isn't held too long
-      this._scheduleBufferFlush(this._lastChunkCallback, 250);
+      // Always schedule a flush after a shorter delay to ensure content isn't held too long
+      this._scheduleBufferFlush(this._lastChunkCallback, 150);
       
       // Return empty string so the chunk isn't sent yet
       return '';
     }
     
-    // If we've accumulated content and have a natural break or enough content, send it
+    // If we've accumulated enough content, send it
     if (this._textBuffer.length > 0) {
-      console.log(`Sending buffered text: "${this._textBuffer.substring(0, 30)}..." (${this._textBuffer.length} chars)`);
+      console.log(`✅ Sending buffer: "${this._textBuffer.substring(0, 30)}${this._textBuffer.length > 30 ? '...' : ''}" (${this._textBuffer.length} chars)`);
       
       // Get the accumulated text
       const bufferToSend = this._textBuffer;
@@ -857,8 +884,8 @@ export class AiBotLlmApiService {
       return bufferToSend;
     }
     
-    // Default case - return text as is
-    return text;
+    // Default case - return processed text as is
+    return processedText;
   }
   
   // Static buffer for accumulating text fragments
@@ -869,6 +896,9 @@ export class AiBotLlmApiService {
   
   // Keep track of the last chunk callback
   private static _lastChunkCallback: StreamChunkCallback | null = null;
+  
+  // Keep the full accumulated response to ensure we don't lose any chunks
+  private static _fullAccumulatedResponse: string = '';
   
   // Helper method to flush the buffer after a delay
   private static _scheduleBufferFlush(onChunk: StreamChunkCallback | null, delayMs: number = 100): void {
@@ -891,7 +921,7 @@ export class AiBotLlmApiService {
     // Set a new timer to flush the buffer
     this._bufferTimer = setTimeout(() => {
       if (this._textBuffer && this._textBuffer.length > 0 && this._lastChunkCallback) {
-        console.log(`Flushing buffer after delay: "${this._textBuffer.substring(0, 30)}..." (${this._textBuffer.length} chars)`);
+        console.log(`⏱️ Flushing buffer after ${delayMs}ms delay: "${this._textBuffer.substring(0, 30)}${this._textBuffer.length > 30 ? '...' : ''}" (${this._textBuffer.length} chars)`);
         this._lastChunkCallback(this._textBuffer);
         this._textBuffer = '';
       }
