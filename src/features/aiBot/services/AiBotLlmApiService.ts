@@ -797,6 +797,242 @@ export class AiBotLlmApiService {
     }
   }
 
+  /**
+   * Fetches a complete chat response in a single REST call (non-streaming)
+   */
+  static async fetchCompleteChatResponse(
+    config: LlmConfig,
+    prompt: string,
+    language: string,
+    messageHistory: ChatMessage[] = []
+  ): Promise<string> {
+    if (!config) {
+      throw new Error('No LLM configuration available');
+    }
+    
+    console.log("DEBUG - fetchCompleteChatResponse with message history:", JSON.stringify(messageHistory));
+
+    // Process and combine system messages to ensure work item context is preserved
+    let updatedHistory: ChatMessage[] = [];
+    let combinedSystemContent = '';
+    let nonSystemMessages: ChatMessage[] = [];
+    
+    // First separate system from non-system messages
+    messageHistory.forEach(msg => {
+      if (msg.role === 'system') {
+        // Collect system message content
+        combinedSystemContent += msg.content + '\n\n';
+      } else {
+        // Keep non-system messages
+        nonSystemMessages.push(msg);
+      }
+    });
+    
+    // Make sure combinedSystemContent is not empty and add language instruction
+    if (combinedSystemContent) {
+      // The work item details are already included in the system messages from AiBotWorkItemService
+      // Add language instruction at the end so it doesn't interfere with work item details
+      const languageInstruction = `Please provide your response in ${language} language.`;
+      combinedSystemContent += '\n\n' + languageInstruction;
+    } else {
+      // If no system content (no work item context), just add the language instruction
+      combinedSystemContent = `Please provide your response in ${language} language.`;
+    }
+    
+    // Create a single system message with all the system content
+    if (combinedSystemContent) {
+      updatedHistory.push({
+        role: 'system',
+        content: combinedSystemContent.trim()
+      });
+    }
+    
+    // Add all non-system messages
+    updatedHistory = [...updatedHistory, ...nonSystemMessages];
+
+    // Add the user prompt if not already in history
+    const lastMessageIsUser = messageHistory.length > 0 && 
+                             messageHistory[messageHistory.length - 1].role === 'user';
+    
+    if (!lastMessageIsUser) {
+      updatedHistory.push({
+        role: 'user',
+        content: prompt
+      });
+    }
+
+    // Prepare request based on provider
+    let requestUrl = config.apiUrl;
+    let requestBody: any;
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (!config.provider || !config.apiUrl || !config.apiToken) {
+      throw new Error("LLM provider, API URL, or API Token not configured correctly.");
+    }
+
+    if (config.provider === 'azure-openai' || config.provider === 'openai') {
+      requestBody = JSON.stringify({
+        messages: updatedHistory,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: 4000,
+        stream: false // Explicitly disable streaming
+      });
+      
+      if (config.provider === 'azure-openai') {
+        headers['api-key'] = config.apiToken;
+        if (!requestUrl.includes('api-version=')) {
+          const separator = requestUrl.includes('?') ? '&' : '?';
+          requestUrl += `${separator}api-version=2023-07-01-preview`; 
+        }
+      } else { // openai
+        headers['Authorization'] = `Bearer ${config.apiToken}`;
+        if (!requestUrl.endsWith('/v1/chat/completions')) {
+          if (!requestUrl.endsWith('/')) {
+            requestUrl += '/';
+          }
+          requestUrl += 'v1/chat/completions';
+        }
+      }
+    } else if (config.provider === 'gemini') {
+      // Format history for Gemini (similar to streaming but without stream endpoint)
+      let formattedHistory: any[] = [];
+      
+      // First, check if we have a system message (work item context)
+      const systemMessages = updatedHistory.filter(msg => msg.role === 'system');
+      const nonSystemMessagesFormatted = updatedHistory.filter(msg => msg.role !== 'system');
+      
+      // If we have system messages, add them as a special prefixed user message
+      if (systemMessages.length > 0) {
+        // Combine all system messages
+        let combinedSystemContent = systemMessages.map(msg => msg.content).join('\n\n');
+        
+        // Create a special prefixed message that clearly marks this as system context
+        const prefixedSystemMessage = 
+          "###SYSTEM CONTEXT (IMPORTANT - NOT USER QUERY)###\n\n" + 
+          combinedSystemContent + 
+          "\n\n###END SYSTEM CONTEXT###\n\n" +
+          "Please keep the above context in mind when responding to my questions. My first question is coming next.";
+        
+        // Add as the first user message
+        formattedHistory.push({
+          role: 'user',
+          parts: [{ text: prefixedSystemMessage }]
+        });
+        
+        // Add a model response to acknowledge the system context
+        formattedHistory.push({
+          role: 'model',
+          parts: [{ text: "I'll keep that context in mind when answering your questions." }]
+        });
+      }
+      
+      // Then add all non-system messages with the appropriate role conversion
+      nonSystemMessagesFormatted.forEach(msg => {
+        formattedHistory.push({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }]
+        });
+      });
+      
+      // Use the regular generateContent endpoint instead of streamGenerateContent
+      if (requestUrl.includes(':streamGenerateContent')) {
+        requestUrl = requestUrl.replace(':streamGenerateContent', ':generateContent');
+      } else if (!requestUrl.includes(':generateContent')) {
+        // If no specific endpoint is included
+        if (requestUrl.includes('/models/')) {
+          // Extract the model name and construct the correct URL
+          const modelMatch = requestUrl.match(/\/models\/([^\/]+)/);
+          if (modelMatch && modelMatch[1]) {
+            const modelName = modelMatch[1];
+            if (requestUrl.endsWith(modelName)) {
+              requestUrl += ':generateContent';
+            } else {
+              const baseUrl = requestUrl.split('/models/')[0];
+              requestUrl = `${baseUrl}/models/${modelName}:generateContent`;
+            }
+          } else {
+            requestUrl += ':generateContent';
+          }
+        } else {
+          // If no model is specified, use gemini-pro as default
+          requestUrl = requestUrl.endsWith('/')
+            ? `${requestUrl}v1beta/models/gemini-pro:generateContent`
+            : `${requestUrl}/v1beta/models/gemini-pro:generateContent`;
+        }
+      }
+
+      // Use the API key directly for Gemini
+      headers['x-goog-api-key'] = config.apiToken;
+
+      requestBody = JSON.stringify({
+        contents: formattedHistory,
+        generationConfig: {
+          temperature: config.temperature ?? 0.7,
+          maxOutputTokens: 4000,
+          topP: 1,
+          topK: 1
+        },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+        ]
+      });
+    } else {
+      throw new Error(`Unsupported provider "${config.provider}" selected.`);
+    }
+
+    // Make the fetch request for the complete response
+    console.log(`Fetching complete response from: ${requestUrl}`);
+    const response = await fetch(requestUrl, {
+      method: 'POST',
+      headers: headers,
+      body: requestBody
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    
+    // Extract and process content based on the provider
+    let content = '';
+    
+    if (config.provider === 'azure-openai' || config.provider === 'openai') {
+      content = data.choices?.[0]?.message?.content || '';
+    } else if (config.provider === 'gemini') {
+      content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
+
+    // Process escape sequences in the content
+    const processedContent = this.processEscapeSequences(content);
+    return processedContent;
+  }
+
+  // Helper function to process escape sequences in text
+  static processEscapeSequences(text: string): string {
+    if (!text) return '';
+    
+    return text
+      // Handle common escape sequences
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\r/g, '\r')
+      // Handle JSON escapes (quotes, backslashes, etc)
+      .replace(/\\([\\/"'bfnrt])/g, '$1')
+      // Handle double backslashes that might remain
+      .replace(/\\\\/g, '\\')
+      // Handle unicode escape sequences
+      .replace(/\\u([0-9a-fA-F]{4})/g, (match, code) => 
+        String.fromCharCode(parseInt(code, 16))
+      );
+  }
+
   // Add this function near the processing related functions to handle markdown preservation
   static preserveMarkdownFormatting(text: string): string {
     // First, process escape sequences in the text

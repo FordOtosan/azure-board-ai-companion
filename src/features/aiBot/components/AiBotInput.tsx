@@ -1,13 +1,14 @@
 import {
-  Send,
-  Stop
+    Send,
+    Stop
 } from '@mui/icons-material';
 import {
-  Box,
-  IconButton,
-  Paper,
-  TextField,
-  Tooltip,
+    Box,
+    CircularProgress,
+    IconButton,
+    Paper,
+    TextField,
+    Tooltip,
 } from '@mui/material';
 import React, { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { LlmConfig } from '../../../features/settings/services/LlmSettingsService';
@@ -32,6 +33,7 @@ const inputTranslations = {
     shiftEnterHint: '(Shift+Enter for new line)',
     selectLlm: 'Please select an LLM to start chatting',
     loadingWorkItem: 'Loading work item details...',
+    generating: 'Generating response...'
   },
   tr: {
     typeMessage: 'Bir mesaj yazın...',
@@ -40,6 +42,7 @@ const inputTranslations = {
     shiftEnterHint: '(Yeni satır için Shift+Enter)',
     selectLlm: 'Sohbete başlamak için bir LLM seçin',
     loadingWorkItem: 'İş öğesi detayları yükleniyor...',
+    generating: 'Cevap oluşturuluyor...'
   }
 };
 
@@ -124,6 +127,9 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
   };
 
   const getPlaceholderText = () => {
+    if (effectiveIsLoading) {
+      return T.generating;
+    }
     if (!workItemContextReady) {
       return T.loadingWorkItem;
     }
@@ -194,6 +200,30 @@ export const AiBotInput: React.FC<AiBotInputProps> = ({
           </span>
         </Tooltip>
       </Box>
+      
+      {/* Loading indicator */}
+      {effectiveIsLoading && (
+        <Box 
+          sx={{ 
+            width: '100%', 
+            display: 'flex', 
+            justifyContent: 'center', 
+            alignItems: 'center',
+            mt: 1,
+            color: 'text.secondary',
+            fontSize: '0.875rem'
+          }}
+        >
+          <Box component="span" sx={{ 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            justifyContent: 'center'
+          }}>
+            <CircularProgress size={16} sx={{ mr: 1, animation: 'spin 1.5s linear infinite' }} />
+            {T.generating}
+          </Box>
+        </Box>
+      )}
     </Paper>
   );
 };
