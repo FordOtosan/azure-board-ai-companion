@@ -6,16 +6,18 @@ import {
     Modal,
     Paper,
     Popover,
-    TextField,
     Tooltip,
     Typography,
     useTheme
 } from '@mui/material';
+import MDEditor from '@uiw/react-md-editor';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { Language } from '../../../translations';
+import { AiBotWorkItemService } from '../services/AiBotWorkItemService';
 import '../styles/aiBot.css';
 import { AiBotMessage } from './AiBotChat';
 
@@ -33,7 +35,8 @@ const messagesTranslations = {
     useAsTitle: 'Use as Title',
     useAsDescription: 'Use as Description',
     useAsAcceptanceCriteria: 'Use as Acceptance Criteria',
-    useAsStoryPoint: 'Use as Story Point'
+    useAsStoryPoint: 'Use as Story Point',
+    markdownPreserved: 'Markdown formatting will be preserved when you use this content.'
   },
   tr: {
     copy: 'Mesajı kopyala',
@@ -42,7 +45,8 @@ const messagesTranslations = {
     useAsTitle: 'Başlık olarak kullan',
     useAsDescription: 'Açıklama olarak kullan',
     useAsAcceptanceCriteria: 'Kabul kriterleri olarak kullan',
-    useAsStoryPoint: 'Story Point olarak kullan'
+    useAsStoryPoint: 'Story Point olarak kullan',
+    markdownPreserved: 'Bu içeriği kullandığınızda Markdown formatı korunacaktır.'
   }
 };
 
@@ -60,6 +64,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   
   const theme = useTheme();
+  const themeMode = theme.palette.mode;
   const T = messagesTranslations[currentLanguage];
   
   useEffect(() => {
@@ -92,21 +97,61 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
   };
   
   // Handle using content for different purposes
-  const handleUseContent = (type: 'title' | 'description' | 'acceptanceCriteria') => {
-    // Just log for now, would integrate with work item functionality in a real implementation
-    console.log(`Using content as ${type}:`, selectedContent);
-    
-    // In a real implementation, this would send the content to the work item field
-    // For example: WorkItemService.setField(type, selectedContent);
-    
-    // Create a custom event that can be listened for by other components
-    const event = new CustomEvent('useContent', {
-      detail: {
-        type,
-        content: selectedContent
+  const handleUseContent = async (type: 'title' | 'description' | 'acceptanceCriteria') => {
+    try {
+      // Get the current work item
+      const currentWorkItem = await AiBotWorkItemService.getCurrentWorkItem();
+      
+      if (!currentWorkItem) {
+        console.error('Could not get current work item');
+        return;
       }
-    });
-    document.dispatchEvent(event);
+      
+      let fieldName = '';
+      let fieldValue = selectedContent;
+      
+      // Map the type to the appropriate field name
+      switch (type) {
+        case 'title':
+          fieldName = 'System.Title';
+          break;
+        case 'description':
+          fieldName = 'System.Description';
+          // For HTML fields like description, ensure we're using the raw markdown
+          // The Azure DevOps API will handle converting markdown to HTML
+          break;
+        case 'acceptanceCriteria':
+          fieldName = 'Microsoft.VSTS.Common.AcceptanceCriteria';
+          // For HTML fields like acceptance criteria, ensure we're using the raw markdown
+          // The Azure DevOps API will handle converting markdown to HTML
+          break;
+      }
+      
+      // Update the work item field
+      const success = await AiBotWorkItemService.updateWorkItemField(
+        currentWorkItem.id,
+        fieldName,
+        fieldValue
+      );
+      
+      if (success) {
+        console.log(`Updated work item field ${type} successfully`);
+      } else {
+        console.error(`Failed to update work item field ${type}`);
+      }
+      
+      // Create a custom event that can be listened for by other components
+      const event = new CustomEvent('useContent', {
+        detail: {
+          type,
+          content: selectedContent,
+          success
+        }
+      });
+      document.dispatchEvent(event);
+    } catch (error) {
+      console.error(`Error updating work item field ${type}:`, error);
+    }
     
     // Close the modal
     handleCloseContentModal();
@@ -566,15 +611,20 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
             {T.useContent}
           </Typography>
           
-          <TextField
-            fullWidth
-            multiline
-            rows={8}
-            value={selectedContent}
-            onChange={(e) => setSelectedContent(e.target.value)}
-            variant="outlined"
-            sx={{ mb: 3 }}
-          />
+          <Box data-color-mode={themeMode} sx={{ mb: 3 }}>
+            <MDEditor
+              value={selectedContent}
+              onChange={(value) => setSelectedContent(value || '')}
+              height={300}
+              preview="edit"
+              previewOptions={{
+                rehypePlugins: [[rehypeSanitize]],
+              }}
+            />
+            <Typography variant="caption" sx={{ display: 'block', mt: 1, color: 'text.secondary' }}>
+              {T.markdownPreserved}
+            </Typography>
+          </Box>
           
           <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2 }}>
             <Button 

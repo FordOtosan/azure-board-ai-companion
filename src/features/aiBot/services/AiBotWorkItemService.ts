@@ -1121,4 +1121,41 @@ When providing content for titles, descriptions, or acceptance criteria, use ric
     
     return prompt;
   }
+
+  /**
+   * Update a field value for a work item
+   * @param workItemId The ID of the work item to update
+   * @param fieldName The name of the field to update
+   * @param fieldValue The new value for the field
+   * @returns A boolean indicating success or failure
+   */
+  static async updateWorkItemField(
+    workItemId: number,
+    fieldName: string,
+    fieldValue: any
+  ): Promise<boolean> {
+    try {
+      this.log(LogLevel.INFO, `Updating work item ${workItemId} field "${fieldName}"`);
+      
+      // Ensure SDK is ready
+      await SDK.ready();
+      
+      // Get the WorkItemFormService
+      const workItemFormService = await SDK.getService<IWorkItemFormService>(
+        WorkItemTrackingServiceIds.WorkItemFormService
+      );
+      
+      // Set the field value
+      await workItemFormService.setFieldValue(fieldName, fieldValue);
+      
+      // Save the changes
+      await workItemFormService.save();
+      
+      this.log(LogLevel.INFO, `Successfully updated work item ${workItemId} field "${fieldName}"`);
+      return true;
+    } catch (error) {
+      this.log(LogLevel.ERROR, `Error updating work item ${workItemId} field "${fieldName}"`, error);
+      return false;
+    }
+  }
 } 
