@@ -197,11 +197,12 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         component="h1" 
         sx={{ 
           fontWeight: 600, 
-          mt: 3, 
-          mb: 2,
+          mt: 2, 
+          mb: 1,
           borderBottom: `1px solid ${theme.palette.divider}`,
           pb: 1,
-          color: theme.palette.primary.main
+          color: theme.palette.primary.main,
+          fontSize: '1.2rem',
         }}
       >
         {children}
@@ -213,9 +214,10 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         component="h2" 
         sx={{ 
           fontWeight: 600, 
-          mt: 2.5, 
-          mb: 1.5,
-          color: theme.palette.primary.dark
+          mt: 1.5, 
+          mb: 1,
+          color: theme.palette.primary.dark,
+          fontSize: '1.1rem',
         }}
       >
         {children}
@@ -227,8 +229,9 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         component="h3" 
         sx={{ 
           fontWeight: 600, 
-          mt: 2, 
-          mb: 1
+          mt: 1, 
+          mb: 0.5,
+          fontSize: '1rem',
         }}
       >
         {children}
@@ -240,8 +243,9 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         variant="body1" 
         sx={{ 
           whiteSpace: 'pre-line',
-          my: 1,
-          lineHeight: 1.6
+          my: 0.5,
+          lineHeight: 1.4,
+          fontSize: '0.8rem',
         }}
       >
         {children}
@@ -251,10 +255,10 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
       <Box 
         component="ul" 
         sx={{ 
-          pl: 3, 
-          my: 1.5,
+          pl: 2.5,
+          my: 0.75,
           '& li': {
-            mb: 0.5
+            mb: 0.25
           }
         }}
       >
@@ -265,10 +269,10 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
       <Box 
         component="ol" 
         sx={{ 
-          pl: 3, 
-          my: 1.5,
+          pl: 2.5,
+          my: 0.75,
           '& li': {
-            mb: 0.5
+            mb: 0.25
           }
         }}
       >
@@ -280,11 +284,16 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         component="li" 
         sx={{ 
           '& p': { 
-            my: 0.5 
+            my: 0.25
           }
         }}
       >
-        <Typography variant="body1">{children}</Typography>
+        <Typography 
+          variant="body1"
+          sx={{ fontSize: '0.8rem' }}
+        >
+          {children}
+        </Typography>
       </Box>
     ),
     blockquote: ({ children }: any) => (
@@ -292,11 +301,12 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         component="blockquote" 
         sx={{ 
           borderLeft: `4px solid ${theme.palette.primary.light}`,
-          pl: 2,
-          py: 0.5,
-          my: 1.5,
+          pl: 1.5,
+          py: 0.25,
+          my: 0.75,
           backgroundColor: theme.palette.background.paper,
-          borderRadius: '4px'
+          borderRadius: '4px',
+          fontSize: '0.8rem',
         }}
       >
         {children}
@@ -309,13 +319,13 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
           component="pre" 
           sx={{ 
             backgroundColor: theme.palette.grey[100],
-            p: 2,
+            p: 1.5,
             borderRadius: 1,
             overflowX: 'auto',
-            my: 2,
+            my: 1,
             fontFamily: 'monospace',
-            fontSize: '0.875rem',
-            lineHeight: 1.5,
+            fontSize: '0.8rem',
+            lineHeight: 1.4,
             border: `1px solid ${theme.palette.divider}`
           }}
           className={className}
@@ -330,10 +340,10 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
           sx={{ 
             backgroundColor: theme.palette.grey[200],
             px: 0.5,
-            py: 0.3,
+            py: 0.25,
             borderRadius: 0.5,
             fontFamily: 'monospace',
-            fontSize: '0.875em'
+            fontSize: '0.8rem'
           }}
         >
           {children}
@@ -345,7 +355,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         component="div" 
         sx={{ 
           overflowX: 'auto',
-          my: 2
+          my: 1
         }}
       >
         <Box 
@@ -356,8 +366,9 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
             border: `1px solid ${theme.palette.divider}`,
             '& th, & td': {
               border: `1px solid ${theme.palette.divider}`,
-              p: 1.5,
-              textAlign: 'left'
+              p: 1,
+              textAlign: 'left',
+              fontSize: '0.8rem'
             },
             '& th': {
               backgroundColor: theme.palette.grey[100],
@@ -376,7 +387,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
       <Box 
         component="hr" 
         sx={{ 
-          my: 3,
+          my: 1.5,
           borderWidth: 0,
           borderTop: `1px solid ${theme.palette.divider}`
         }}
@@ -390,7 +401,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         flexGrow: 1, 
         overflowY: 'auto',
         overflowX: 'hidden',
-        p: 2,
+        p: 1.5,
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
@@ -419,7 +430,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
         .map((msg) => (
           <Box key={msg.id} sx={{ 
             position: 'relative', 
-            mb: 2, 
+            mb: 1.5,
             display: 'flex', 
             alignItems: 'flex-end',
             flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' 
@@ -427,7 +438,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
             <Paper
               elevation={0}
               sx={{
-                p: 2,
+                p: 1.5,
                 maxWidth: '90%',
                 borderRadius: 2,
                 position: 'relative',
@@ -443,6 +454,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
               <Box sx={{ 
                 wordBreak: 'break-word',
                 whiteSpace: 'pre-line',
+                fontSize: '0.8rem',
                 '& .markdown-body': {
                   backgroundColor: 'transparent',
                   color: 'inherit'
@@ -459,7 +471,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
                         const content = String(children);
                         if (content.match(/\b([0-9]|[1-9][0-9]|100)\b/g)) {
                           return (
-                            <Box component="p" sx={{ my: 1, lineHeight: 1.6 }}>
+                            <Box component="p" sx={{ my: 0.5, lineHeight: 1.4, fontSize: '0.8rem' }}>
                               {renderMessageWithClickableNumbers(content)}
                             </Box>
                           );
@@ -474,7 +486,7 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
                 ) : (
                   <Typography 
                     variant="body1" 
-                    sx={{ whiteSpace: 'pre-line' }}
+                    sx={{ whiteSpace: 'pre-line', fontSize: '0.8rem' }}
                   >
                     {msg.content}
                   </Typography>
