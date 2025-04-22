@@ -11,6 +11,7 @@ import {
     useTheme
 } from '@mui/material';
 import MDEditor from '@uiw/react-md-editor';
+import { marked } from 'marked';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
@@ -36,7 +37,7 @@ const messagesTranslations = {
     useAsDescription: 'Use as Description',
     useAsAcceptanceCriteria: 'Use as Acceptance Criteria',
     useAsStoryPoint: 'Use as Story Point',
-    markdownPreserved: 'Markdown formatting will be preserved when you use this content.'
+    markdownPreserved: 'Markdown formatting will be rendered properly when applied to work items.'
   },
   tr: {
     copy: 'Mesajı kopyala',
@@ -46,7 +47,7 @@ const messagesTranslations = {
     useAsDescription: 'Açıklama olarak kullan',
     useAsAcceptanceCriteria: 'Kabul kriterleri olarak kullan',
     useAsStoryPoint: 'Story Point olarak kullan',
-    markdownPreserved: 'Bu içeriği kullandığınızda Markdown formatı korunacaktır.'
+    markdownPreserved: 'İş öğelerine uygulandığında Markdown biçimlendirmesi düzgün şekilde görüntülenecektir.'
   }
 };
 
@@ -117,13 +118,19 @@ export const AiBotMessages: React.FC<AiBotMessagesProps> = ({ messages, currentL
           break;
         case 'description':
           fieldName = 'System.Description';
-          // For HTML fields like description, ensure we're using the raw markdown
-          // The Azure DevOps API will handle converting markdown to HTML
+          // For HTML fields like description, convert Markdown to HTML
+          fieldValue = marked.parse(selectedContent, {
+            gfm: true, // GitHub flavored markdown
+            breaks: true, // Convert line breaks to <br>
+          }) as string;
           break;
         case 'acceptanceCriteria':
           fieldName = 'Microsoft.VSTS.Common.AcceptanceCriteria';
-          // For HTML fields like acceptance criteria, ensure we're using the raw markdown
-          // The Azure DevOps API will handle converting markdown to HTML
+          // For HTML fields like acceptance criteria, convert Markdown to HTML
+          fieldValue = marked.parse(selectedContent, {
+            gfm: true,
+            breaks: true,
+          }) as string;
           break;
       }
       
