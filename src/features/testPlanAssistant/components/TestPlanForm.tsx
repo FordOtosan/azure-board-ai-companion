@@ -595,10 +595,25 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
         throw new Error('Failed to get organization or project information');
       }
       
-      // Calculate total items to create
-      const totalSuites = testPlan.testSuites.length;
-      const totalCases = testPlan.testSuites.reduce((sum, suite) => sum + suite.testCases.length, 0);
-      const totalItems = 1 + totalSuites + totalCases; // 1 for test plan itself
+      // Calculate total items to create (including nested suites)
+      const countItems = (suites: TestSuite[]): number => {
+        let count = 0;
+        
+        for (const suite of suites) {
+          count += 1; // Count the suite itself
+          count += suite.testCases.length; // Count test cases
+          
+          // Count nested suites recursively
+          if (suite.testSuites && suite.testSuites.length > 0) {
+            count += countItems(suite.testSuites);
+          }
+        }
+        
+        return count;
+      };
+      
+      const totalSuites = countItems(testPlan.testSuites);
+      const totalItems = 1 + totalSuites; // 1 for test plan itself
       
       let completedItems = 0;
       
@@ -616,38 +631,54 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
         testSuites: [] // Ensure testSuites is initialized
       };
       
-      // Create test suites and test cases
-      for (const suite of testPlan.testSuites) {
-        setCurrentItemBeingCreated(`Test Suite: ${suite.name}`);
-        
-        // Create the test suite
-        const createdSuite = await createTestSuite(createdTestPlan.id, suite);
-        
-        completedItems++;
-        setExactCompletedItems(prev => prev + 1);
-        setCreationProgress(Math.min(Math.round((completedItems / totalItems) * 100), 100));
-        
-        const suiteResult: TestSuiteCreationResult = {
-          ...createdSuite,
-          testCases: [] // Initialize empty array
-        };
-        
-        // Create test cases for this suite
-        for (const testCase of suite.testCases) {
-          setCurrentItemBeingCreated(`Test Case: ${testCase.name}`);
+      // Recursive function to create test suites and their nested suites
+      const createNestedTestSuites = async (
+        parentSuites: TestSuite[],
+        parentPlanId: number,
+        parentResult: { testSuites: TestSuiteCreationResult[] }
+      ) => {
+        for (const suite of parentSuites) {
+          setCurrentItemBeingCreated(`Test Suite: ${suite.name}`);
           
-          // Create the test case
-          const createdTestCase = await createTestCase(createdTestPlan.id, createdSuite.id, testCase);
+          // Create the test suite
+          const createdSuite = await createTestSuite(parentPlanId, suite);
           
           completedItems++;
           setExactCompletedItems(prev => prev + 1);
           setCreationProgress(Math.min(Math.round((completedItems / totalItems) * 100), 100));
           
-          suiteResult.testCases.push(createdTestCase);
+          const suiteResult: TestSuiteCreationResult & { testSuites: TestSuiteCreationResult[] } = {
+            ...createdSuite,
+            testCases: [], // Initialize empty array
+            testSuites: [] // Initialize empty array for nested suites
+          };
+          
+          // Add this suite to the parent's result
+          parentResult.testSuites.push(suiteResult);
+          
+          // Create test cases for this suite
+          for (const testCase of suite.testCases) {
+            setCurrentItemBeingCreated(`Test Case: ${testCase.name}`);
+            
+            // Create the test case
+            const createdTestCase = await createTestCase(parentPlanId, createdSuite.id, testCase);
+            
+            completedItems++;
+            setExactCompletedItems(prev => prev + 1);
+            setCreationProgress(Math.min(Math.round((completedItems / totalItems) * 100), 100));
+            
+            suiteResult.testCases.push(createdTestCase);
+          }
+          
+          // Recursively create nested test suites if any
+          if (suite.testSuites && suite.testSuites.length > 0) {
+            await createNestedTestSuites(suite.testSuites, parentPlanId, suiteResult);
+          }
         }
-        
-        result.testSuites.push(suiteResult);
-      }
+      };
+      
+      // Start creating test suites (and their nested suites) recursively
+      await createNestedTestSuites(testPlan.testSuites, createdTestPlan.id, result);
       
       setCreatedTestPlans([result]);
       
@@ -678,29 +709,16 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
       setTimeout(() => {
         onClose();
       }, 1000);
-      
     } catch (error) {
       console.error('Error creating test plan:', error);
+      setCreationError(error instanceof Error ? error.message : 'Unknown error creating test plan');
+      setIsCreating(false);
       
-      // Format error message for display
-      let errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      
-      // Handle specific error cases
-      if (errorMessage.includes('TF401347')) {
-        errorMessage = `Area path error: The specified area path does not exist in this project.`;
-      } else if (errorMessage.includes('TF201007')) {
-        errorMessage = `Project permission error: You do not have sufficient permissions to create test plans in this project.`;
-      } else if (errorMessage.includes('401')) {
-        errorMessage = `Authentication error: Your Azure DevOps credentials may have expired. Please refresh the page.`;
-      }
-      
-      setCreationError(errorMessage);
       setNotification({
         open: true,
-        message: `Failed to create test plan: ${errorMessage}`,
+        message: `Error creating test plan: ${error instanceof Error ? error.message : 'Unknown error'}`,
         severity: 'error'
       });
-      setIsCreating(false);
     }
   };
   

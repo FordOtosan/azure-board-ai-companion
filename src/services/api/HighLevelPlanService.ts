@@ -21,6 +21,7 @@ STRICT RULES:
 9. KEEP ALL TITLES CONCISE - MAXIMUM 10 WORDS PER TITLE
 10. DO NOT mention inability to access files or documents - if document content is provided, use it directly
 11. RESPECT THE HIERARCHY - {hierarchyInstructions}
+12. Generate all work item titles in {languageInstruction}
 
 IMPORTANT: If the request includes document content, use it to build a structured plan. DO NOT respond that you cannot access files - the content has already been provided to you.
 
@@ -57,17 +58,19 @@ Example for a non-development request:
     content: string,
     fileContent?: string,
     messageHistory: ChatMessage[] = [],
-    teamConfig?: TeamWorkItemConfig | WorkItemMapping | null
+    teamConfig?: TeamWorkItemConfig | WorkItemMapping | null,
+    language: string = 'en'
   ): Promise<string> {
     console.log('[HighLevelPlanService] Generating high-level plan');
     console.log(`[HighLevelPlanService] Using LLM provider: ${config.provider}`);
+    console.log(`[HighLevelPlanService] Using language: ${language}`);
     console.log(`[HighLevelPlanService] Content length: ${content.length} chars`);
     if (fileContent) {
       console.log(`[HighLevelPlanService] File content length: ${fileContent.length} chars`);
     }
     
-    // Get the prompt with configured work item types
-    const prompt = this.buildHighLevelPlanPrompt(teamConfig);
+    // Get the prompt with configured work item types and language
+    const prompt = this.buildHighLevelPlanPrompt(teamConfig, language);
     
     let isDocumentContent = false;
     // Check if the content looks like a document (longer than 1000 characters, contains multiple paragraphs)
@@ -177,9 +180,10 @@ Example for a non-development request:
   /**
    * Build the high-level plan prompt with configured work item types
    * @param teamConfig Optional team configuration with work item types or a WorkItemMapping
+   * @param language The language to use for the prompt (e.g., 'en', 'tr')
    * @returns Formatted high-level plan prompt
    */
-  private static buildHighLevelPlanPrompt(teamConfig?: TeamWorkItemConfig | WorkItemMapping | null): string {
+  private static buildHighLevelPlanPrompt(teamConfig?: TeamWorkItemConfig | WorkItemMapping | null, language: string = 'en'): string {
     console.log('[HighLevelPlanService] Building high-level plan prompt');
     
     // Default work item types if no team config provided
@@ -378,13 +382,19 @@ Example for a non-development request:
       nonDevelopmentExample = this.createSimpleNonDevExample(workItemTypes);
     }
     
+    // Language instruction based on selected language
+    const languageInstruction = language === 'tr' ? 
+      'Turkish (Türkçe) using appropriate Turkish terminology' : 
+      'English using appropriate English terminology';
+      
     // Replace placeholders in the template
     const finalPrompt = this.HIGH_LEVEL_PLAN_PROMPT_TEMPLATE
       .replace('{workItemTypesExample}', workItemTypesExample)
       .replace('{workItemTypesList}', workItemTypesList)
       .replace('{hierarchyInstructions}', hierarchyInstructions)
       .replace('{developmentExample}', developmentExample)
-      .replace('{nonDevelopmentExample}', nonDevelopmentExample);
+      .replace('{nonDevelopmentExample}', nonDevelopmentExample)
+      .replace('{languageInstruction}', languageInstruction);
       
     // Log all variables and the final prompt
     console.log('==== HIGH LEVEL PLAN PROMPT VARIABLES ====');

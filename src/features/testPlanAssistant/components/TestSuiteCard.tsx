@@ -3,6 +3,7 @@ import {
     Box,
     Button,
     Card,
+    Divider,
     IconButton,
     TextField,
     Typography,
@@ -18,12 +19,14 @@ interface TestSuiteCardProps {
   suite: TestSuite;
   suiteIndex: number;
   currentLanguage: 'en' | 'tr';
+  nestedLevel?: number;
 }
 
 export const TestSuiteCard: React.FC<TestSuiteCardProps> = ({
   suite,
   suiteIndex,
-  currentLanguage
+  currentLanguage,
+  nestedLevel = 0
 }) => {
   const theme = useTheme();
   const T = getTranslations(currentLanguage);
@@ -62,12 +65,33 @@ export const TestSuiteCard: React.FC<TestSuiteCardProps> = ({
     setTestPlan(updatedTestPlan);
   };
   
+  const handleAddNestedSuite = () => {
+    if (!testPlan) return;
+    
+    const updatedTestPlan = { ...testPlan };
+    if (!updatedTestPlan.testSuites[suiteIndex].testSuites) {
+      updatedTestPlan.testSuites[suiteIndex].testSuites = [];
+    }
+    
+    updatedTestPlan.testSuites[suiteIndex].testSuites!.push({
+      name: 'New Nested Test Suite',
+      testCases: []
+    });
+    
+    setTestPlan(updatedTestPlan);
+  };
+  
+  // Calculate the nested indent margin
+  const nestedMargin = `${nestedLevel * 16}px`;
+  
   return (
     <Card sx={{ 
       mb: 2, 
       p: 2,
       border: `1px solid ${theme.palette.divider}`,
-      boxShadow: theme.shadows[2]
+      boxShadow: theme.shadows[2],
+      ml: nestedMargin,
+      borderLeft: nestedLevel > 0 ? `4px solid ${theme.palette.primary.main}` : undefined
     }}>
       <Box sx={{ 
         display: 'flex', 
@@ -134,9 +158,9 @@ export const TestSuiteCard: React.FC<TestSuiteCardProps> = ({
           />
         ))}
         
-        {suite.testCases.length === 0 && (
+        {suite.testCases.length === 0 && !suite.testSuites?.length && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2, fontStyle: 'italic' }}>
-            No test cases yet.
+            No test cases or nested suites yet.
           </Typography>
         )}
         
@@ -145,11 +169,41 @@ export const TestSuiteCard: React.FC<TestSuiteCardProps> = ({
           onClick={handleAddTestCase}
           variant="outlined"
           size="small"
-          sx={{ mt: 1 }}
+          sx={{ mt: 1, mr: 1 }}
         >
           {T.addTestCase}
         </Button>
+        
+        <Button
+          startIcon={<AddIcon />}
+          onClick={handleAddNestedSuite}
+          variant="outlined"
+          size="small"
+          sx={{ mt: 1 }}
+        >
+          Add Nested Suite
+        </Button>
       </Box>
+      
+      {/* Render nested test suites if any */}
+      {suite.testSuites && suite.testSuites.length > 0 && (
+        <Box sx={{ mt: 3 }}>
+          <Divider sx={{ mb: 2 }} />
+          <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 'bold' }}>
+            Nested Test Suites:
+          </Typography>
+          
+          {suite.testSuites.map((nestedSuite, nestedIndex) => (
+            <TestSuiteCard
+              key={`nested-suite-${nestedIndex}`}
+              suite={nestedSuite}
+              suiteIndex={nestedIndex}
+              currentLanguage={currentLanguage}
+              nestedLevel={nestedLevel + 1}
+            />
+          ))}
+        </Box>
+      )}
     </Card>
   );
 }; 

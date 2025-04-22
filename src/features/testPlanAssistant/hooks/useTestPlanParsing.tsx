@@ -190,10 +190,10 @@ export const useTestPlanParsing = (teamMapping?: TeamWorkItemConfig | null) => {
       testPlan.testSuites = [];
     }
     
-    // Validate each test suite
-    testPlan.testSuites = testPlan.testSuites.map((suite: any, index: number) => {
+    // Recursive function to validate a test suite and its nested suites
+    const validateTestSuite = (suite: any, index: number, path: string): any => {
       if (!suite) {
-        console.warn(`[useTestPlanParsing] Test suite at index ${index} is null or undefined, creating default`);
+        console.warn(`[useTestPlanParsing] Test suite at ${path} is null or undefined, creating default`);
         return {
           name: `Suite ${index + 1}`,
           testCases: []
@@ -202,20 +202,20 @@ export const useTestPlanParsing = (teamMapping?: TeamWorkItemConfig | null) => {
       
       // Ensure suite has a name
       if (!suite.name) {
-        console.warn(`[useTestPlanParsing] Test suite at index ${index} has no name, setting default`);
+        console.warn(`[useTestPlanParsing] Test suite at ${path} has no name, setting default`);
         suite.name = `Suite ${index + 1}`;
       }
       
-      // Ensure testCases is an array (this prevents the e.testCases is undefined error)
+      // Ensure testCases is an array
       if (!suite.testCases || !Array.isArray(suite.testCases)) {
-        console.warn(`[useTestPlanParsing] Test suite "${suite.name}" has no test cases or it's not an array, initializing empty array`);
+        console.warn(`[useTestPlanParsing] Test suite "${suite.name}" at ${path} has no test cases or it's not an array, initializing empty array`);
         suite.testCases = [];
       }
       
       // Validate each test case
       suite.testCases = suite.testCases.map((testCase: any, caseIndex: number) => {
         if (!testCase) {
-          console.warn(`[useTestPlanParsing] Test case at index ${caseIndex} in suite "${suite.name}" is null or undefined, creating default`);
+          console.warn(`[useTestPlanParsing] Test case at index ${caseIndex} in suite "${suite.name}" at ${path} is null or undefined, creating default`);
           return {
             name: `Test Case ${caseIndex + 1}`,
             description: '',
@@ -225,7 +225,7 @@ export const useTestPlanParsing = (teamMapping?: TeamWorkItemConfig | null) => {
         
         // Ensure test case has a name
         if (!testCase.name) {
-          console.warn(`[useTestPlanParsing] Test case at index ${caseIndex} in suite "${suite.name}" has no name, setting default`);
+          console.warn(`[useTestPlanParsing] Test case at index ${caseIndex} in suite "${suite.name}" at ${path} has no name, setting default`);
           testCase.name = `Test Case ${caseIndex + 1}`;
         }
         
@@ -236,14 +236,14 @@ export const useTestPlanParsing = (teamMapping?: TeamWorkItemConfig | null) => {
         
         // Ensure steps is an array
         if (!testCase.steps || !Array.isArray(testCase.steps)) {
-          console.warn(`[useTestPlanParsing] Test case "${testCase.name}" has no steps or it's not an array, initializing empty array`);
+          console.warn(`[useTestPlanParsing] Test case "${testCase.name}" in suite at ${path} has no steps or it's not an array, initializing empty array`);
           testCase.steps = [];
         }
         
         // Validate each step
         testCase.steps = testCase.steps.map((step: any, stepIndex: number) => {
           if (!step) {
-            console.warn(`[useTestPlanParsing] Step at index ${stepIndex} in test case "${testCase.name}" is null or undefined, creating default`);
+            console.warn(`[useTestPlanParsing] Step at index ${stepIndex} in test case "${testCase.name}" in suite at ${path} is null or undefined, creating default`);
             return {
               action: `Step ${stepIndex + 1}`,
               expectedResult: ''
@@ -252,7 +252,7 @@ export const useTestPlanParsing = (teamMapping?: TeamWorkItemConfig | null) => {
           
           // Ensure step has an action
           if (!step.action) {
-            console.warn(`[useTestPlanParsing] Step at index ${stepIndex} in test case "${testCase.name}" has no action, setting default`);
+            console.warn(`[useTestPlanParsing] Step at index ${stepIndex} in test case "${testCase.name}" in suite at ${path} has no action, setting default`);
             step.action = `Step ${stepIndex + 1}`;
           }
           
@@ -267,7 +267,25 @@ export const useTestPlanParsing = (teamMapping?: TeamWorkItemConfig | null) => {
         return testCase;
       });
       
+      // Handle nested test suites if they exist
+      if (suite.testSuites) {
+        if (!Array.isArray(suite.testSuites)) {
+          console.warn(`[useTestPlanParsing] Nested test suites in "${suite.name}" at ${path} is not an array, initializing empty array`);
+          suite.testSuites = [];
+        } else {
+          // Recursively validate each nested test suite
+          suite.testSuites = suite.testSuites.map((nestedSuite: any, nestedIndex: number) => {
+            return validateTestSuite(nestedSuite, nestedIndex, `${path} > ${suite.name}`);
+          });
+        }
+      }
+      
       return suite;
+    };
+    
+    // Validate each top-level test suite and its nested suites
+    testPlan.testSuites = testPlan.testSuites.map((suite: any, index: number) => {
+      return validateTestSuite(suite, index, 'root');
     });
     
     console.log('[useTestPlanParsing] Test plan structure validation complete');
