@@ -1,15 +1,16 @@
 import { Add as AddIcon } from '@mui/icons-material';
 import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CircularProgress,
-  LinearProgress,
-  Snackbar,
-  Typography,
-  useTheme
+    Alert,
+    Box,
+    Button,
+    Card,
+    CircularProgress,
+    LinearProgress,
+    Snackbar,
+    Typography,
+    useTheme
 } from '@mui/material';
+import { marked } from 'marked'; // Import the marked library
 import * as React from 'react';
 import { WorkItemCreationResult } from '../../../services/api/WorkItemService';
 import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
@@ -380,7 +381,7 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
           // Create main fields object with safe defaults
           const fields: Record<string, any> = {
             'System.Title': item.title,
-            'System.Description': item.description || 'No description provided',
+            'System.Description': item.description ? marked(item.description) : 'No description provided',
             'Microsoft.VSTS.Common.Priority': 2, // Default priority
             // Use just the project name for Area Path to be more resilient
             'System.AreaPath': projectName // Use only project name to avoid tree name errors
@@ -395,7 +396,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
               ? item.acceptanceCriteria.join("\n") 
               : item.acceptanceCriteria;
             
-            fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = criteriaValue;
+            // Convert Markdown to HTML for AcceptanceCriteria
+            fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = marked(criteriaValue);
           }
           
           // Add any additional fields

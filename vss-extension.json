@@ -2,7 +2,7 @@
   "manifestVersion": 1,
   "id": "fo-ai-assistant-multi",
   "publisher": "zaltunka",
-  "version": "1.435.0",
+  "version": "1.439.0",
   "name": "Fo AI Assistant Multi Model",
   "description": "AI-powered assistant for Azure Boards work items with expert software development analysis. Developed by Ford Otosan - Founited team",
   "categories": [

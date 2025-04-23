@@ -1,19 +1,21 @@
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import {
-    Box,
-    Button,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogTitle,
-    FormControl,
-    IconButton,
-    InputLabel,
-    MenuItem,
-    Select,
-    TextField,
-    Typography
+  Box,
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
+  TextField,
+  Typography,
+  useTheme
 } from '@mui/material';
+import MDEditor from '@uiw/react-md-editor';
 import * as React from 'react';
 import { Language } from '../../../translations';
 import { useWorkItemContext } from '../context/WorkItemContext';
@@ -39,6 +41,8 @@ export const EditDialog: React.FC<EditDialogProps> = ({
     setCurrentEditItem
   } = useWorkItemContext();
   
+  const theme = useTheme();
+  const themeMode = theme.palette.mode;
   const T = getTranslations(currentLanguage);
   
   // Local state for the edited item
@@ -178,26 +182,33 @@ export const EditDialog: React.FC<EditDialogProps> = ({
             required
           />
           
-          <TextField
-            fullWidth
-            label={T.description}
-            value={editedItem.description}
-            onChange={(e) => handleFieldChange('description', e.target.value)}
-            multiline
-            rows={4}
-            sx={{ mb: 3 }}
-            required
-          />
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              {T.description}
+            </Typography>
+            <div data-color-mode={themeMode}>
+              <MDEditor
+                value={editedItem.description}
+                onChange={(value) => handleFieldChange('description', value || '')}
+                height={200}
+                preview="edit"
+              />
+            </div>
+          </Box>
           
-          <TextField
-            fullWidth
-            label={T.acceptanceCriteria}
-            value={editedItem.acceptanceCriteria || ''}
-            onChange={(e) => handleFieldChange('acceptanceCriteria', e.target.value)}
-            multiline
-            rows={4}
-            sx={{ mb: 3 }}
-          />
+          <Box sx={{ mb: 3 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              {T.acceptanceCriteria}
+            </Typography>
+            <div data-color-mode={themeMode}>
+              <MDEditor
+                value={editedItem.acceptanceCriteria || ''}
+                onChange={(value) => handleFieldChange('acceptanceCriteria', value || '')}
+                height={200}
+                preview="edit"
+              />
+            </div>
+          </Box>
           
           <Typography variant="subtitle1" gutterBottom>
             {T.additionalFields}
@@ -249,4 +260,4 @@ export const EditDialog: React.FC<EditDialogProps> = ({
       </DialogActions>
     </Dialog>
   );
-}; 
+};

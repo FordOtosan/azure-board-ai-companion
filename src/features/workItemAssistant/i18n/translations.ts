@@ -44,6 +44,7 @@ export const workItemTranslations = {
     creationComplete: 'Complete',
     creationProgress: '%% Complete',
     editFields: 'Edit Fields',
+    preview: 'Preview',
     // Work item type translations
     epic: 'Epic',
     feature: 'Feature',
@@ -105,6 +106,7 @@ export const workItemTranslations = {
     creationComplete: 'Tamamlandı',
     creationProgress: '%% Tamamlandı',
     editFields: 'Alanları Düzenle',
+    preview: 'Önizleme',
     // Work item type translations
     epic: 'Epik',
     feature: 'Özellik',
@@ -127,4 +129,4 @@ export const workItemTranslations = {
 
 export const getTranslations = (language: Language) => {
   return workItemTranslations[language];
-}; 
+};
