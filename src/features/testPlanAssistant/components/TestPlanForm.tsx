@@ -18,21 +18,17 @@ import {
     useTheme
 } from '@mui/material';
 import * as React from 'react';
+import { TestPlanService } from '../../../services/api/TestPlanService';
 import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
-import { AzureDevOpsSdkService } from '../../../services/sdk/AzureDevOpsSdkService';
 import { TestPlanProvider, useTestPlanContext } from '../context/TestPlanContext';
 import { useTestPlanParsing } from '../hooks/useTestPlanParsing';
 import { useTestPlanRefinement } from '../hooks/useTestPlanRefinement';
 import { getTranslations } from '../i18n/translations';
 import {
     TestCase,
-    TestCaseCreationResult,
-    TestPlan,
     TestPlanCreationResult,
     TestPlanFormProps,
-    TestStep,
-    TestSuite,
-    TestSuiteCreationResult
+    TestSuite
 } from '../types/TestPlanTypes';
 
 // Enhanced test case component with editing capabilities
@@ -40,7 +36,7 @@ const TestCaseItem: React.FC<{
   testCase: TestCase;
   suiteIndex: number;
   caseIndex: number;
-  onEdit: (suiteIndex: number, caseIndex: number, field: string, value: string) => void;
+  onEdit: (suiteIndex: number, caseIndex: number, field: string, value: string | any[]) => void;
 }> = ({ 
   testCase, 
   suiteIndex, 
@@ -128,7 +124,7 @@ const TestCaseItem: React.FC<{
                         onChange={(e) => {
                           const updatedSteps = [...(testCase.steps || [])];
                           updatedSteps[index].action = e.target.value;
-                          onEdit(suiteIndex, caseIndex, 'steps', JSON.stringify(updatedSteps));
+                          onEdit(suiteIndex, caseIndex, 'steps', updatedSteps);
                         }}
                         label={`Step ${index + 1}`}
                         variant="standard"
@@ -141,7 +137,7 @@ const TestCaseItem: React.FC<{
                         onChange={(e) => {
                           const updatedSteps = [...(testCase.steps || [])];
                           updatedSteps[index].expectedResult = e.target.value;
-                          onEdit(suiteIndex, caseIndex, 'steps', JSON.stringify(updatedSteps));
+                          onEdit(suiteIndex, caseIndex, 'steps', updatedSteps);
                         }}
                         label="Expected Result"
                         variant="standard"
@@ -169,7 +165,7 @@ const TestCaseItem: React.FC<{
                 expectedResult: 'Expected result'
               }];
               
-              onEdit(suiteIndex, caseIndex, 'steps', JSON.stringify(newSteps));
+              onEdit(suiteIndex, caseIndex, 'steps', newSteps);
             }}
             sx={{ mt: 2 }}
           >
@@ -187,7 +183,7 @@ const TestSuiteCard: React.FC<{
   suiteIndex: number; 
   currentLanguage: string;
   onEdit: (suiteIndex: number, field: string, value: string) => void;
-  onEditTestCase: (suiteIndex: number, caseIndex: number, field: string, value: string) => void;
+  onEditTestCase: (suiteIndex: number, caseIndex: number, field: string, value: string | any[]) => void;
   onAddTestCase: (suiteIndex: number) => void;
 }> = ({ 
   suite, 
@@ -379,204 +375,6 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
     }
   };
 
-  // Helper function for making authenticated API calls to Azure DevOps
-  const callAzureDevOpsApi = async (url: string, method: string, body?: any) => {
-    try {
-      // Use the AzureDevOpsSdkService to make the API call
-      // This is a wrapper around our new approach to avoid modifying all call sites
-      console.log(`[TestPlanForm] Call Azure DevOps API: ${method} ${url}`);
-      
-      // Extract the API path from the URL (everything after _apis)
-      const apiPathMatch = url.match(/.*\/_apis\/(.*)/);
-      if (!apiPathMatch || !apiPathMatch[1]) {
-        throw new Error('Invalid API URL format');
-      }
-      
-      const apiPath = `_apis/${apiPathMatch[1]}`;
-      
-      // Use the invokeAzureDevOpsApi function from AzureDevOpsSdkService
-      return await AzureDevOpsSdkService.invokeAzureDevOpsApi(apiPath, method, body);
-    } catch (error) {
-      console.error('[TestPlanForm] API call error:', error);
-      throw error;
-    }
-  };
-
-  // Create a test plan in Azure DevOps Test Plans
-  const createTestPlan = async (testPlan: TestPlan): Promise<TestPlanCreationResult> => {
-    try {
-      // Get organization and project info
-      const { organizationName, projectName } = await getOrganizationAndProject();
-      
-      if (!organizationName || !projectName) {
-        throw new Error('Failed to get organization or project information');
-      }
-      
-      // Use a different approach that will avoid CORS issues - using work item tracking client
-      console.log(`[TestPlanForm] Creating test plan: ${testPlan.name}`);
-      const accessToken = await AzureDevOpsSdkService.getAccessToken();
-      
-      // Use the SDK for authentication but make the request without browser fetch
-      // This uses the invokeAzureDevOpsApi method which uses the SDK's host URL
-      const planData = await AzureDevOpsSdkService.invokeAzureDevOpsApi(
-        `_apis/testplan/plans?api-version=7.0`, 
-        'POST',
-        {
-          name: testPlan.name,
-          area: { 
-            name: projectName 
-          },
-          iteration: {
-            name: projectName
-          }
-        }
-      );
-      
-      console.log('[TestPlanForm] Test plan created:', planData);
-      
-      return {
-        id: planData.id,
-        name: planData.name,
-        url: planData.url || `https://dev.azure.com/${organizationName}/${projectName}/_testPlans/execute?planId=${planData.id}`,
-        testSuites: [] // Will be populated later
-      };
-    } catch (error) {
-      console.error('Error creating test plan:', error);
-      throw error;
-    }
-  };
-  
-  // Create a test suite in Azure DevOps Test Plans
-  const createTestSuite = async (testPlanId: number, suite: TestSuite): Promise<TestSuiteCreationResult> => {
-    try {
-      // Get organization and project info
-      const { organizationName, projectName } = await getOrganizationAndProject();
-      
-      if (!organizationName || !projectName) {
-        throw new Error('Failed to get organization or project information');
-      }
-      
-      // Use the SDK API method through invokeAzureDevOpsApi to avoid CORS issues
-      console.log(`[TestPlanForm] Creating test suite: ${suite.name}`);
-      
-      // Use the invokeAzureDevOpsApi method from the SDK service
-      const suiteData = await AzureDevOpsSdkService.invokeAzureDevOpsApi(
-        `_apis/testplan/plans/${testPlanId}/suites?api-version=7.0`,
-        'POST',
-        {
-          name: suite.name,
-          suiteType: 'StaticSuite',
-          parentSuite: {
-            id: testPlanId
-          }
-        }
-      );
-      
-      console.log('[TestPlanForm] Test suite created:', suiteData);
-      
-      return {
-        id: suiteData.id,
-        name: suiteData.name,
-        url: suiteData.url || `https://dev.azure.com/${organizationName}/${projectName}/_testPlans/execute?planId=${testPlanId}&suiteId=${suiteData.id}`,
-        testCases: [] // Will be populated later
-      };
-    } catch (error) {
-      console.error('Error creating test suite:', error);
-      throw error;
-    }
-  };
-  
-  // Create a test case in Azure DevOps Test Plans
-  const createTestCase = async (testPlanId: number, suiteId: number, testCase: TestCase): Promise<TestCaseCreationResult> => {
-    try {
-      // Get organization and project info
-      const { organizationName, projectName } = await getOrganizationAndProject();
-      
-      if (!organizationName || !projectName) {
-        throw new Error('Failed to get organization or project information');
-      }
-      
-      // First, create a test case work item using the WIT client (this already uses SDK properly)
-      console.log(`[TestPlanForm] Creating test case: ${testCase.name}`);
-      
-      const patchOperations = [
-        {
-          op: "add",
-          path: "/fields/System.Title",
-          value: testCase.name
-        },
-        {
-          op: "add",
-          path: "/fields/System.Description",
-          value: testCase.description || ""
-        },
-        {
-          op: "add",
-          path: "/fields/Microsoft.VSTS.TCM.Steps",
-          value: formatTestSteps(testCase.steps)
-        }
-      ];
-      
-      // Use the WorkItemTrackingClient from SDK which doesn't have CORS issues
-      const witClient = await AzureDevOpsSdkService.getWorkItemTrackingClient();
-      const testCaseWorkItem = await witClient.createWorkItem(
-        patchOperations,
-        projectName,
-        "Test Case"
-      );
-      
-      console.log('[TestPlanForm] Test case work item created:', testCaseWorkItem);
-      
-      // Now, add the test case to the test suite using invokeAzureDevOpsApi
-      // instead of direct fetch to avoid CORS issues
-      console.log(`[TestPlanForm] Adding test case ${testCaseWorkItem.id} to suite ${suiteId}`);
-      
-      const addedTestCase = await AzureDevOpsSdkService.invokeAzureDevOpsApi(
-        `_apis/testplan/plans/${testPlanId}/suites/${suiteId}/testcases/${testCaseWorkItem.id}?api-version=7.0`,
-        'POST'
-      );
-      
-      console.log('[TestPlanForm] Test case added to suite:', addedTestCase);
-      
-      return {
-        id: testCaseWorkItem.id,
-        name: testCaseWorkItem.fields["System.Title"],
-        url: testCaseWorkItem.url || `https://dev.azure.com/${organizationName}/${projectName}/_workitems/edit/${testCaseWorkItem.id}`
-      };
-    } catch (error) {
-      console.error('Error creating test case:', error);
-      throw error;
-    }
-  };
-  
-  // Format test steps into HTML steps format for Azure DevOps
-  const formatTestSteps = (steps?: TestStep[]): string => {
-    if (!steps || steps.length === 0) {
-      return "<steps id='0'><step id='1' type='ActionStep'><parameterizedString isformatted='true'>Sample step</parameterizedString><parameterizedString isformatted='true'>Expected result</parameterizedString></step></steps>";
-    }
-    
-    let stepsXml = "<steps id='0'>";
-    steps.forEach((step, index) => {
-      stepsXml += `<step id='${index + 1}' type='ActionStep'>`;
-      stepsXml += `<parameterizedString isformatted='true'>${escapeXml(step.action)}</parameterizedString>`;
-      stepsXml += `<parameterizedString isformatted='true'>${escapeXml(step.expectedResult || '')}</parameterizedString>`;
-      stepsXml += "</step>";
-    });
-    stepsXml += "</steps>";
-    
-    return stepsXml;
-  };
-  
-  // Helper to escape XML special characters
-  const escapeXml = (str: string): string => {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;');
-  };
-
   // Handle creating the test plan
   const handleCreateTestPlan = async () => {
     if (!testPlan) return;
@@ -617,70 +415,17 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
       
       let completedItems = 0;
       
-      // Create the test plan
+      // Create the test plan using the TestPlanService
       setCurrentItemBeingCreated(`Test Plan: ${testPlan.name}`);
-      const createdTestPlan = await createTestPlan(testPlan);
+      
+      // Use the new TestPlanService instead of direct API calls
+      const createdTestPlan = await TestPlanService.createTestPlan(testPlan);
       
       completedItems++;
       setExactCompletedItems(prev => prev + 1);
       setCreationProgress(Math.min(Math.round((completedItems / totalItems) * 100), 100));
       
-      // Create the test suites and test cases
-      const result: TestPlanCreationResult = {
-        ...createdTestPlan,
-        testSuites: [] // Ensure testSuites is initialized
-      };
-      
-      // Recursive function to create test suites and their nested suites
-      const createNestedTestSuites = async (
-        parentSuites: TestSuite[],
-        parentPlanId: number,
-        parentResult: { testSuites: TestSuiteCreationResult[] }
-      ) => {
-        for (const suite of parentSuites) {
-          setCurrentItemBeingCreated(`Test Suite: ${suite.name}`);
-          
-          // Create the test suite
-          const createdSuite = await createTestSuite(parentPlanId, suite);
-          
-          completedItems++;
-          setExactCompletedItems(prev => prev + 1);
-          setCreationProgress(Math.min(Math.round((completedItems / totalItems) * 100), 100));
-          
-          const suiteResult: TestSuiteCreationResult & { testSuites: TestSuiteCreationResult[] } = {
-            ...createdSuite,
-            testCases: [], // Initialize empty array
-            testSuites: [] // Initialize empty array for nested suites
-          };
-          
-          // Add this suite to the parent's result
-          parentResult.testSuites.push(suiteResult);
-          
-          // Create test cases for this suite
-          for (const testCase of suite.testCases) {
-            setCurrentItemBeingCreated(`Test Case: ${testCase.name}`);
-            
-            // Create the test case
-            const createdTestCase = await createTestCase(parentPlanId, createdSuite.id, testCase);
-            
-            completedItems++;
-            setExactCompletedItems(prev => prev + 1);
-            setCreationProgress(Math.min(Math.round((completedItems / totalItems) * 100), 100));
-            
-            suiteResult.testCases.push(createdTestCase);
-          }
-          
-          // Recursively create nested test suites if any
-          if (suite.testSuites && suite.testSuites.length > 0) {
-            await createNestedTestSuites(suite.testSuites, parentPlanId, suiteResult);
-          }
-        }
-      };
-      
-      // Start creating test suites (and their nested suites) recursively
-      await createNestedTestSuites(testPlan.testSuites, createdTestPlan.id, result);
-      
-      setCreatedTestPlans([result]);
+      setCreatedTestPlans([createdTestPlan]);
       
       // Set creation complete
       setIsCreating(false);
@@ -695,7 +440,7 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
       // Emit custom event to notify other parts of the application
       const testPlanCreatedEvent = new CustomEvent('testPlanCreated', {
         detail: {
-          testPlan: result
+          testPlan: createdTestPlan
         }
       });
       document.dispatchEvent(testPlanCreatedEvent);
@@ -908,17 +653,12 @@ const TestPlanFormInner: React.FC<TestPlanFormProps> = ({
               const updatedTestPlan = { ...testPlan };
               const testCase = updatedTestPlan.testSuites[suiteIndex].testCases[caseIndex];
               
-              if (field === 'name') {
+              if (field === 'name' && typeof value === 'string') {
                 testCase.name = value;
-              } else if (field === 'description') {
+              } else if (field === 'description' && typeof value === 'string') {
                 testCase.description = value;
-              } else if (field === 'steps') {
-                try {
-                  // Parse the steps from JSON string
-                  testCase.steps = JSON.parse(value);
-                } catch (error) {
-                  console.error('Error parsing steps JSON:', error);
-                }
+              } else if (field === 'steps' && Array.isArray(value)) {
+                testCase.steps = value;
               }
               
               setTestPlan(updatedTestPlan);
@@ -1007,4 +747,4 @@ export const TestPlanForm: React.FC<TestPlanFormProps> = (props) => {
       <TestPlanFormInner {...props} />
     </TestPlanProvider>
   );
-}; 
+};
