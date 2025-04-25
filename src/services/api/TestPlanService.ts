@@ -463,15 +463,15 @@ export class TestPlanService {
     }
 
     /**
-     * Adds an existing Test Case work item to a specified Test Suite using query parameters.
-     * @param baseUrl Base URL for the project API
-     * @param baseHeaders Base authorization headers
-     * @param testPlanId ID of the Test Plan containing the suite
-     * @param testSuiteId ID of the Test Suite to add the case to
-     * @param testCaseId ID of the Test Case work item to add
-     * @returns Promise resolving when the operation is complete.
-     * @throws Error if the API call fails.
-     */
+  * Adds an existing Test Case work item to a specified Test Suite.
+  * @param baseUrl Base URL for the project API
+  * @param baseHeaders Base authorization headers
+  * @param testPlanId ID of the Test Plan containing the suite
+  * @param testSuiteId ID of the Test Suite to add the case to
+  * @param testCaseId ID of the Test Case work item to add
+  * @returns Promise resolving when the operation is complete.
+  * @throws Error if the API call fails.
+  */
     private static async addTestCaseToSuite(
         baseUrl: string,
         baseHeaders: any,
@@ -479,22 +479,73 @@ export class TestPlanService {
         testSuiteId: number,
         testCaseId: number
     ): Promise<void> {
-        // Endpoint for adding existing work items (by ID) to a suite via query parameter
-        const addTestCaseApiPath = `${baseUrl}/_apis/testplan/Plans/${testPlanId}/Suites/${testSuiteId}/testcases?workItemIds=${testCaseId}&api-version=${this.API_VERSION}`; // Using API version from class constant
+        try {
+            // Step 1: Add the test case to the suite using the correct endpoint
+            const addTestCaseApiPath = `${baseUrl}/_apis/testplan/Plans/${testPlanId}/Suites/${testSuiteId}/TestCase?api-version=${this.API_VERSION}`;
+            const requestBody = {
+                workItems: [
+                    {
+                        id: testCaseId.toString()
+                    }
+                ]
+            };
 
-        console.log(`[TestPlanService] REQUEST - Add Test Case(s) to Suite API Call:
-      URL: ${addTestCaseApiPath}
-      Method: POST
-    `);
+            console.log(`[TestPlanService] REQUEST - Add Test Case to Suite API Call:
+            URL: ${addTestCaseApiPath}
+            Method: POST
+            Request Body: ${JSON.stringify(requestBody, null, 2)}
+        `);
 
-        // Make the API call - typically requires POST but no request body with this query param format
-        await axios.post(
-            addTestCaseApiPath,
-            null, // No request body needed
-            { headers: { ...baseHeaders, 'Content-Type': 'application/json' } } // Standard JSON Content-Type often expected
-        );
+            const response = await axios.post(
+                addTestCaseApiPath,
+                requestBody,
+                { headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
+            );
 
-        console.log(`[TestPlanService] Successfully added test case work item ID ${testCaseId} to test suite ${testSuiteId}`);
+            console.log(`[TestPlanService] RESPONSE - Add Test Case to Suite API Call:
+            Status: ${response.status}
+            Response: ${JSON.stringify(response.data, null, 2)}
+        `);
+
+            // Step 2: Create test points for the test case in the suite - THIS IS THE KEY STEP!
+            const pointsApiPath = `${baseUrl}/_apis/test/Plans/${testPlanId}/Suites/${testSuiteId}/Points?api-version=${this.API_VERSION}`;
+            const pointsRequestBody = {
+                pointsFilter: {
+                    testcaseIds: [testCaseId]
+                }
+            };
+
+            console.log(`[TestPlanService] REQUEST - Create Test Points API Call:
+            URL: ${pointsApiPath}
+            Method: POST
+            Request Body: ${JSON.stringify(pointsRequestBody, null, 2)}
+        `);
+
+            const pointsResponse = await axios.post(
+                pointsApiPath,
+                pointsRequestBody,
+                { headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
+            );
+
+            console.log(`[TestPlanService] RESPONSE - Create Test Points API Call:
+            Status: ${pointsResponse.status}
+            Response: ${JSON.stringify(pointsResponse.data, null, 2)}
+        `);
+
+            console.log(`[TestPlanService] Successfully added test case work item ID ${testCaseId} to test suite ${testSuiteId} and created test points`);
+        } catch (error: any) {
+            // Error handling
+            const status = error.response?.status;
+            const errorMessage = error.response?.data?.message || (error instanceof Error ? error.message : 'Unknown error');
+            console.error(`[TestPlanService] ERROR - Add Test Case to Suite API Call Failure:
+            Test Case ID: ${testCaseId}
+            Test Suite ID: ${testSuiteId}
+            Status: ${status ?? 'N/A'}
+            Error: ${errorMessage}
+            Response Data: ${JSON.stringify(error.response?.data, null, 2)}
+        `);
+            throw new Error(`Failed to add test case ${testCaseId} to suite ${testSuiteId}. Error: ${errorMessage}`);
+        }
     }
 
     /**
