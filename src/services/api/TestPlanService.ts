@@ -463,15 +463,16 @@ export class TestPlanService {
     }
 
     /**
-  * Adds an existing Test Case work item to a specified Test Suite.
-  * @param baseUrl Base URL for the project API
-  * @param baseHeaders Base authorization headers
-  * @param testPlanId ID of the Test Plan containing the suite
-  * @param testSuiteId ID of the Test Suite to add the case to
-  * @param testCaseId ID of the Test Case work item to add
-  * @returns Promise resolving when the operation is complete.
-  * @throws Error if the API call fails.
-  */
+     * Adds an existing Test Case work item to a specified Test Suite.
+     * Uses the Test API instead of TestPlan API for better compatibility.
+     * @param baseUrl Base URL for the project API
+     * @param baseHeaders Base authorization headers
+     * @param testPlanId ID of the Test Plan containing the suite
+     * @param testSuiteId ID of the Test Suite to add the case to
+     * @param testCaseId ID of the Test Case work item to add
+     * @returns Promise resolving when the operation is complete.
+     * @throws Error if the API call fails.
+     */
     private static async addTestCaseToSuite(
         baseUrl: string,
         baseHeaders: any,
@@ -480,25 +481,18 @@ export class TestPlanService {
         testCaseId: number
     ): Promise<void> {
         try {
-            // Step 1: Add the test case to the suite using the correct endpoint
-            const addTestCaseApiPath = `${baseUrl}/_apis/testplan/Plans/${testPlanId}/Suites/${testSuiteId}/TestCase?api-version=${this.API_VERSION}`;
-            const requestBody = {
-                workItems: [
-                    {
-                        id: testCaseId.toString()
-                    }
-                ]
-            };
+            // Step 1: Use the Test API instead of TestPlan API for adding test cases
+            const addTestCaseApiPath = `${baseUrl}/_apis/test/Plans/${testPlanId}/Suites/${testSuiteId}/TestCases/${testCaseId}?api-version=${this.API_VERSION}`;
 
             console.log(`[TestPlanService] REQUEST - Add Test Case to Suite API Call:
             URL: ${addTestCaseApiPath}
             Method: POST
-            Request Body: ${JSON.stringify(requestBody, null, 2)}
         `);
 
+            // Use empty body for this endpoint
             const response = await axios.post(
                 addTestCaseApiPath,
-                requestBody,
+                {},
                 { headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
             );
 
@@ -507,44 +501,59 @@ export class TestPlanService {
             Response: ${JSON.stringify(response.data, null, 2)}
         `);
 
-            // Step 2: Create test points for the test case in the suite - THIS IS THE KEY STEP!
-            const pointsApiPath = `${baseUrl}/_apis/test/Plans/${testPlanId}/Suites/${testSuiteId}/Points?api-version=${this.API_VERSION}`;
-            const pointsRequestBody = {
-                pointsFilter: {
-                    testcaseIds: [testCaseId]
+            console.log(`[TestPlanService] Successfully added test case ${testCaseId} to suite ${testSuiteId}`);
+
+            // Give Azure DevOps a moment to process the link
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Step 2: Verify the link was created successfully by getting the test cases in the suite
+            try {
+                const verifyApiPath = `${baseUrl}/_apis/test/Plans/${testPlanId}/Suites/${testSuiteId}/TestCases?api-version=${this.API_VERSION}`;
+                const verifyResponse = await axios.get(verifyApiPath, { headers: baseHeaders });
+
+                console.log(`[TestPlanService] VERIFICATION - Test Cases in Suite:
+                Count: ${verifyResponse.data.count || 'N/A'}
+                Test Cases: ${JSON.stringify(verifyResponse.data.value || [], null, 2)}
+            `);
+
+                // Check if our test case is in the list
+                const isLinked = verifyResponse.data.value?.some((tc: any) =>
+                    tc.testCase?.id === testCaseId || tc.workItem?.id === testCaseId
+                );
+
+                if (!isLinked) {
+                    console.warn(`[TestPlanService] WARNING - Test case ${testCaseId} not found in verification check for suite ${testSuiteId}`);
                 }
-            };
-
-            console.log(`[TestPlanService] REQUEST - Create Test Points API Call:
-            URL: ${pointsApiPath}
-            Method: POST
-            Request Body: ${JSON.stringify(pointsRequestBody, null, 2)}
-        `);
-
-            const pointsResponse = await axios.post(
-                pointsApiPath,
-                pointsRequestBody,
-                { headers: { ...baseHeaders, 'Content-Type': 'application/json' } }
-            );
-
-            console.log(`[TestPlanService] RESPONSE - Create Test Points API Call:
-            Status: ${pointsResponse.status}
-            Response: ${JSON.stringify(pointsResponse.data, null, 2)}
-        `);
-
-            console.log(`[TestPlanService] Successfully added test case work item ID ${testCaseId} to test suite ${testSuiteId} and created test points`);
+            } catch (verifyError: any) {
+                // Just log the verification error, don't fail the operation
+                console.warn(`[TestPlanService] Verification check failed, but test case link might still be created: ${verifyError.message}`);
+            }
+            
+            return;
         } catch (error: any) {
-            // Error handling
+            // Detailed error handling
             const status = error.response?.status;
             const errorMessage = error.response?.data?.message || (error instanceof Error ? error.message : 'Unknown error');
+            const errorDetails = error.response?.data || {};
+
             console.error(`[TestPlanService] ERROR - Add Test Case to Suite API Call Failure:
             Test Case ID: ${testCaseId}
             Test Suite ID: ${testSuiteId}
             Status: ${status ?? 'N/A'}
             Error: ${errorMessage}
-            Response Data: ${JSON.stringify(error.response?.data, null, 2)}
+            Response Data: ${JSON.stringify(errorDetails, null, 2)}
         `);
-            throw new Error(`Failed to add test case ${testCaseId} to suite ${testSuiteId}. Error: ${errorMessage}`);
+
+            // Provide specific error messages for common issues
+            if (status === 404) {
+                throw new Error(`Failed to add test case ${testCaseId} to suite ${testSuiteId}. The test plan, suite, or test case could not be found (404).`);
+            } else if (status === 400) {
+                throw new Error(`Failed to add test case ${testCaseId} to suite ${testSuiteId}. Bad request (400): ${errorMessage}`);
+            } else if (status === 401 || status === 403) {
+                throw new Error(`Failed to add test case ${testCaseId} to suite ${testSuiteId}. Authentication or authorization issue (${status}).`);
+            } else {
+                throw new Error(`Failed to add test case ${testCaseId} to suite ${testSuiteId}. Status: ${status ?? 'N/A'}. Error: ${errorMessage}`);
+            }
         }
     }
 
@@ -555,24 +564,22 @@ export class TestPlanService {
      * @returns The formatted XML string for the steps field. Returns a default placeholder if steps are empty/undefined.
      */
     private static convertStepsToXml(steps: { action: string; expectedResult?: string }[] | undefined): string {
-        // Provide a default placeholder if no steps are given
+        // Format the XML properly
         if (!steps || steps.length === 0) {
-            return '<steps id="0" last="1"><step id="1" type="ActionStep"><parameterizedString isformatted="true">&lt;P&gt;No steps defined.&lt;/P&gt;</parameterizedString><parameterizedString isformatted="true"></parameterizedString><description/></step></steps>';
+            return '<steps id="0" last="1"><step id="1" type="ActionStep"><parameterizedString isformatted="true">&lt;P&gt;No steps defined.&lt;/P&gt;</parameterizedString><parameterizedString isformatted="true">&lt;P&gt;&lt;/P&gt;</parameterizedString><description/></step></steps>';
         }
 
-        // Build the XML structure
-        let stepsXml = `<steps id="0" last="${steps.length}">`; // Set last attribute correctly
+        let stepsXml = `<steps id="0" last="${steps.length}">`;
 
         steps.forEach((step, index) => {
-            // Wrap step content in HTML Paragraph tags for better UI rendering in ADO
-            const actionHtml = `<P>${this.escapeHtml(step.action || '')}</P>`; // Ensure action exists
-            const expectedResultHtml = `<P>${this.escapeHtml(step.expectedResult || '')}</P>`; // Handle potentially undefined expectedResult
+            // Make sure both action and expectedResult are properly wrapped
+            const actionHtml = step.action ? `&lt;P&gt;${this.escapeHtml(step.action)}&lt;/P&gt;` : '&lt;P&gt;&lt;/P&gt;';
+            const expectedResultHtml = step.expectedResult ? `&lt;P&gt;${this.escapeHtml(step.expectedResult)}&lt;/P&gt;` : '&lt;P&gt;&lt;/P&gt;';
 
-            // Append the step node
-            stepsXml += `<step id="${index + 1}" type="ActionStep">` + // ID is 1-based index
+            stepsXml += `<step id="${index + 1}" type="ActionStep">` +
                 `<parameterizedString isformatted="true">${actionHtml}</parameterizedString>` +
                 `<parameterizedString isformatted="true">${expectedResultHtml}</parameterizedString>` +
-                `<description/>` + // Include the required empty description tag
+                `<description/>` +
                 `</step>`;
         });
 
