@@ -1,14 +1,14 @@
 import { Add as AddIcon } from '@mui/icons-material';
 import {
-    Alert,
-    Box,
-    Button,
-    Card,
-    CircularProgress,
-    LinearProgress,
-    Snackbar,
-    Typography,
-    useTheme
+  Alert,
+  Box,
+  Button,
+  Card,
+  CircularProgress,
+  LinearProgress,
+  Snackbar,
+  Typography,
+  useTheme
 } from '@mui/material';
 import { marked } from 'marked'; // Import the marked library
 import * as React from 'react';
@@ -29,7 +29,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
   onSubmit,
   currentLanguage,
   availableTypes,
-  teamMapping
+  teamMapping,
+  selectedTeam
 }) => {
   const theme = useTheme();
   const T = getTranslations(currentLanguage);
@@ -378,13 +379,42 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
           // Update the current item being created
           setCurrentItemBeingCreated(`${item.type}: ${item.title}`);
           
+          // Add detailed logging for debugging the team data
+          console.log(`Selected team debugging info:`);
+          console.log(`- selectedTeam object:`, selectedTeam);
+          console.log(`- selectedTeam type:`, selectedTeam ? typeof selectedTeam : 'null');
+          console.log(`- selectedTeam name:`, selectedTeam?.name);
+          console.log(`- selectedTeam properties:`, selectedTeam ? Object.keys(selectedTeam).join(', ') : 'null');
+          
           // Create main fields object with safe defaults
           const fields: Record<string, any> = {
             'System.Title': item.title,
             'System.Description': item.description ? marked(item.description) : 'No description provided',
             'Microsoft.VSTS.Common.Priority': 2, // Default priority
-            // Use just the project name for Area Path to be more resilient
-            'System.AreaPath': projectName // Use only project name to avoid tree name errors
+            // Include selected team name in Area Path when available - with additional checks
+            'System.AreaPath': (() => {
+              // Check if we have a valid selectedTeam object
+              if (!selectedTeam) {
+                console.log('No selectedTeam object available');
+                return projectName;
+              }
+              
+              // Check what properties are available on the selectedTeam object
+              console.log('Available properties on selectedTeam:', Object.keys(selectedTeam));
+              
+              // Try to find team name in various common properties
+              const teamName = selectedTeam.name || 
+                              (typeof selectedTeam === 'object' && 'id' in selectedTeam ? 
+                                `Team ${selectedTeam.id}` : null);
+              
+              if (teamName) {
+                console.log(`Found team name: ${teamName}`);
+                return `${projectName}\\${teamName}`;
+              } else {
+                console.log('Could not find team name in selectedTeam object');
+                return projectName;
+              }
+            })()
           };
           
           console.log(`Setting Area Path for work item: ${fields['System.AreaPath']}`);

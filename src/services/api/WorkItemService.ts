@@ -405,10 +405,17 @@ export class WorkItemService {
     }
     
     // Add team context
+    console.log(`[WorkItemService] Setting AreaPath with - Project: "${projectName}", Team: "${teamContext.name}", Full value: "${projectName}\\${teamContext.name}"`);
+    
+    // Ensure team context has a valid name before adding it to area path
+    const areaPath = teamContext && teamContext.name 
+      ? `${projectName}\\${teamContext.name}`
+      : projectName;
+      
     patchDocument.push({
       op: Operation.Add,
       path: '/fields/System.AreaPath',
-      value: `${projectName}\\${teamContext.name}`
+      value: areaPath
     });
     
     // Create the work item
