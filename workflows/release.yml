@@ -1,0 +1,94 @@
+# .github/workflows/release.yml
+
+name: Create VSIX Release
+
+# Controls when the workflow will run
+on:
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Tag to create (e.g., v1.0.0). The release will use this tag.'
+        required: true
+        default: 'v0.0.1'
+
+  # Triggers the workflow on push events, but only for tags matching v*.*.* (e.g. v1.0.0, v0.1.0)
+  push:
+    tags:
+      - 'v*.*.*' # Push events to tags like v1.0.0, v0.1.0, etc.
+
+jobs:
+  build-and-release:
+    name: Build and Release VSIX
+    runs-on: ubuntu-latest # Use the latest Ubuntu runner
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4 # Checks out your repository's code
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18' # Specify your desired Node.js version, e.g., 16, 18, 20
+          cache: 'npm' # Cache npm dependencies
+
+      - name: Install dependencies
+        run: npm ci # 'ci' is generally recommended for CI environments for faster, more reliable installs
+        # If you prefer 'npm install', you can use that instead:
+        # run: npm install
+
+      - name: Run package command
+        run: npm run package # This command should generate your .vsix file
+
+      - name: Determine VSIX filename
+        id: get_vsix_filename
+        # This step assumes your vsix file is the only .vsix file in the root directory.
+        # If it's in a subdirectory (e.g., 'dist') or has a more complex name, adjust the path.
+        # For example, if in 'dist': run: echo "vsix_path=$(ls dist/*.vsix | head -n 1)" >> $GITHUB_OUTPUT
+        # Or if you know the exact name pattern based on package.json:
+        # run: |
+        #   PACKAGE_NAME=$(node -p "require('./package.json').name")
+        #   PACKAGE_VERSION=$(node -p "require('./package.json').version")
+        #   echo "vsix_path=${PACKAGE_NAME}-${PACKAGE_VERSION}.vsix" >> $GITHUB_OUTPUT
+        run: echo "vsix_path=$(ls *.vsix | head -n 1)" >> $GITHUB_OUTPUT
+        # Error handling if no .vsix file is found
+        shell: bash
+        continue-on-error: false # Set to true if you want to handle the error differently
+
+      - name: Check if VSIX file exists
+        id: check_file
+        uses: andstor/file-existence-action@v2
+        with:
+          files: "${{ steps.get_vsix_filename.outputs.vsix_path }}"
+          fail: true # Fail the workflow if the file doesn't exist
+
+      # This step uses the softprops/action-gh-release action to create the release
+      # It will use the tag from the push event or the manually entered tag_name
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2 # A popular action for creating releases
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # This token is provided by GitHub
+        with:
+          # If triggered by workflow_dispatch, use the input tag. Otherwise, use the Git tag.
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          # You can customize the release name, by default it's the tag name
+          name: Release ${{ github.event.inputs.tag_name || github.ref_name }}
+          # Set to true if you want this to be a pre-release
+          prerelease: false
+          # Set to true to create a draft release
+          draft: false
+          # You can write release notes here, or leave it to auto-generate based on commits
+          # body: |
+          #   This is an automated release.
+          #   Changes in this release:
+          #   - Feature A
+          #   - Bugfix B
+          files: | # Specify the files to upload as release assets
+            ${{ steps.get_vsix_filename.outputs.vsix_path }}
+            # You can add more files here, e.g.:
+            # README.md
+            # CHANGELOG.md
+
+    outputs:
+      release_url: ${{ steps.create_release.outputs.url }}
