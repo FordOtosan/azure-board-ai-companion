@@ -163,26 +163,7 @@ export class AzureDevOpsSdkService {
     await this.ensureInitialized();
     
     try {
-      // Get access token
-      const accessToken = await this.getAccessToken();
-      
-      // Build request options
-      const options: RequestInit = {
-        method,
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      };
-      
-      // Add body if provided
-      if (body) {
-        options.body = JSON.stringify(body);
-      }
-      
-      // Use the organization and project URL to build the full URL
-      // Get organization and project using other service
+      // Get the organization and project context
       const { organizationName, projectName } = await import('../sdk/AzureDevOpsInfoService').then(
         module => module.getOrganizationAndProject()
       );
@@ -191,26 +172,66 @@ export class AzureDevOpsSdkService {
         throw new Error('Failed to get organization or project information');
       }
       
-      const baseUrl = `https://dev.azure.com/${organizationName}/${projectName}`;
-      const fullUrl = `${baseUrl}/${apiPath}`;
+      // Use SDK's getAppToken() to get a token that can be used server-side
+      const appToken = await SDK.getAppToken();
       
-      console.log(`[AzureDevOpsSdkService] Making SDK-based API call to: ${fullUrl}`);
+      // Use SDK's getHost() for the base URL
+      const host = await SDK.getHost();
+      const hostUrl = `${host.name}/${organizationName}/${projectName}`;
       
-      // Make the request
-      const response = await fetch(fullUrl, options);
+      console.log(`[AzureDevOpsSdkService] Making SDK-powered API call to: ${hostUrl}/${apiPath}`);
       
-      // Handle errors
-      if (!response.ok) {
-        const errorText = await response.text().catch(() => 'Unknown error');
-        throw new Error(`API call failed: ${response.status} ${response.statusText} - ${errorText}`);
-      }
+      // The SDK provides a method for CORS-friendly calls through VSS
+      const vssContext = SDK.getExtensionContext();
       
-      // Parse and return response
-      const result = await response.json();
-      const duration = Date.now() - startTime;
-      console.log(`[AzureDevOpsSdkService] API call completed in ${duration}ms`);
-      
-      return result;
+      // Use VSS to make the request (available in Azure DevOps environment)
+      return new Promise((resolve, reject) => {
+        // @ts-ignore - VSS is globally available in Azure DevOps
+        if (typeof VSS !== 'undefined' && VSS.require) {
+          // @ts-ignore
+          VSS.require(["VSS/RestClient/RestClient"], (RestClient: any) => {
+            try {
+              const client = new RestClient.RestClient(`${vssContext.publisherId}.${vssContext.extensionId}`);
+              const requestOptions = {
+                authToken: appToken,
+                httpMethod: method
+              };
+              
+              // Make the API call with VSS, which handles CORS
+              client.beginRequest(
+                `${hostUrl}/${apiPath}`,
+                null,
+                body,
+                requestOptions,
+                (err: any, response: any, responseBody: any) => {
+                  if (err) {
+                    console.error(`[AzureDevOpsSdkService] Error in VSS API call:`, err);
+                    reject(err);
+                    return;
+                  }
+                  
+                  const statusCode = response?.statusCode;
+                  if (statusCode >= 200 && statusCode < 300) {
+                    const duration = Date.now() - startTime;
+                    console.log(`[AzureDevOpsSdkService] API call completed in ${duration}ms with status ${statusCode}`);
+                    resolve(responseBody);
+                  } else {
+                    const error = new Error(`API call failed with status: ${statusCode}`);
+                    console.error(`[AzureDevOpsSdkService] Request failed:`, error, responseBody);
+                    reject(error);
+                  }
+                }
+              );
+            } catch (e) {
+              console.error(`[AzureDevOpsSdkService] Error setting up VSS request:`, e);
+              reject(e);
+            }
+          });
+        } else {
+          // Fallback for when not in Azure DevOps context or VSS is not available
+          reject(new Error('VSS not available. This extension must run within Azure DevOps.'));
+        }
+      });
     } catch (error) {
       const duration = Date.now() - startTime;
       console.error(`[AzureDevOpsSdkService] Error invoking API after ${duration}ms:`, error);

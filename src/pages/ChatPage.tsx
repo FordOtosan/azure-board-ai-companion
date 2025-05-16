@@ -2348,7 +2348,11 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                   currentLanguage={currentLanguage}
                   availableTypes={teamMapping?.workItemTypes.filter(t => t.enabled).map(t => t.name) || []}
                   teamMapping={teamMapping}
+                  selectedTeam={selectedTeam}
                   onSubmit={async (workItems) => {
+                    // Log the selected team for debugging
+                    console.log('[ChatPage] Submitting work items with team:', selectedTeam);
+                    
                     if (!selectedTeam || !orgProjectInfo.projectName) {
                       showNotification(
                         currentLanguage === 'en' 
@@ -2363,7 +2367,7 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                     setIsCreatingWorkItems(true);
                     
                     try {
-                      // Create work items
+                      // Create work items with the selected team
                       const results = await WorkItemService.createWorkItems(
                         workItems,
                         orgProjectInfo.projectName,

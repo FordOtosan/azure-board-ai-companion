@@ -938,19 +938,29 @@ export class AiBotWorkItemService {
 You are an expert Agile Project Manager and Azure DevOps consultant. 
 You are assisting a user who is currently viewing a work item in Azure DevOps.
 Below is the information about the work item, including any parent and child relationships.
-The user will ask you questions about this work item, and you should provide helpful insights, 
-advice, and suggestions based on this context.
 
 IMPORTANT: Always respond in ${language} language.
 
-Use this information to:
-- Understand the scope and context of the work
-- Identify dependencies and relationships
-- Suggest improvements or best practices
-- Help with estimations, planning, or implementation details
-- Provide advice on agile management of these items
+RESPONSE GUIDELINES:
+- Do not add explanations or additional text unless specifically requested
+- Provide direct, concise responses without elaborating unnecessarily
+- Suggest only a single solution unless the user explicitly asks for multiple options
+- Do not explain your reasoning or thought process unless asked
+- Format responses with correct Markdown without excessive whitespace or line breaks
+- When asked for descriptions, use user story format ("As a [role], I want [goal], so that [benefit]")
+- For acceptance criteria, provide step-by-step testable criteria with clear conditions of satisfaction
+- Remove any extra empty lines or unnecessary margins/padding in your responses
 
-Be conversational, helpful, and concise in your responses. Frame your answers in the context of the work items described below.
+MARKDOWN FORMATTING INSTRUCTIONS:
+When providing content for titles, descriptions, or acceptance criteria, use rich Markdown formatting:
+- Use # headers for titles (e.g., # Title)
+- Use ## for section headers (e.g., ## Description, ## Acceptance Criteria)
+- Use proper list formatting with - or 1. for numbered lists
+- Use **bold** for emphasis on important points
+- Use > blockquotes for highlighting key information
+- Use proper table formatting for structured data
+- Use code blocks with \`\`\` for code examples
+- Use horizontal rules --- for section separators when appropriate
     `;
     
     // If no current work item, provide a default message
@@ -1099,8 +1109,53 @@ Be conversational, helpful, and concise in your responses. Frame your answers in
     }
     
     // Final instruction for the LLM
-    prompt += `\n\nRespond to the user's questions with helpful, actionable insights based on this work item context. If the user asks about something that's not in this context, you can answer based on your general knowledge of Agile and Azure DevOps best practices, but make it clear when you're doing so. Remember to always respond in ${language} language.`;
+    prompt += `\n\n## FINAL INSTRUCTIONS
+1. Respond directly to what the user wants without adding explanations or additional text
+2. Suggest only a single option/solution unless the user explicitly asks for multiple options
+3. When asked for descriptions, format as user story: "As a [role], I want [goal], so that [benefit]"
+4. For acceptance criteria, provide step-by-step testable criteria with clear conditions
+5. Use proper Markdown formatting without excessive whitespace
+6. Keep your responses concise and to the point
+7. Remove any extra empty lines or unnecessary padding in your responses
+8. Always respond in ${language} language`;
     
     return prompt;
+  }
+
+  /**
+   * Update a field value for a work item
+   * @param workItemId The ID of the work item to update
+   * @param fieldName The name of the field to update
+   * @param fieldValue The new value for the field
+   * @returns A boolean indicating success or failure
+   */
+  static async updateWorkItemField(
+    workItemId: number,
+    fieldName: string,
+    fieldValue: any
+  ): Promise<boolean> {
+    try {
+      this.log(LogLevel.INFO, `Updating work item ${workItemId} field "${fieldName}"`);
+      
+      // Ensure SDK is ready
+      await SDK.ready();
+      
+      // Get the WorkItemFormService
+      const workItemFormService = await SDK.getService<IWorkItemFormService>(
+        WorkItemTrackingServiceIds.WorkItemFormService
+      );
+      
+      // Set the field value
+      await workItemFormService.setFieldValue(fieldName, fieldValue);
+      
+      // Save the changes
+      await workItemFormService.save();
+      
+      this.log(LogLevel.INFO, `Successfully updated work item ${workItemId} field "${fieldName}"`);
+      return true;
+    } catch (error) {
+      this.log(LogLevel.ERROR, `Error updating work item ${workItemId} field "${fieldName}"`, error);
+      return false;
+    }
   }
 } 

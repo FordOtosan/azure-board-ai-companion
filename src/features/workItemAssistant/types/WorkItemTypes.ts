@@ -1,3 +1,4 @@
+import { WebApiTeam } from 'azure-devops-extension-api/Core';
 import { TeamWorkItemConfig } from '../../../features/settings/services/WorkItemSettingsService';
 import { Language } from '../../../translations';
 
@@ -37,6 +38,7 @@ export interface WorkItemFormProps {
   currentLanguage: Language;
   availableTypes: string[];
   teamMapping?: TeamWorkItemConfig | null;
+  selectedTeam?: WebApiTeam | null;
 }
 
 // Additional interfaces
@@ -69,4 +71,4 @@ export interface RefinementModalState {
 export interface AdditionalField {
   key: string;
   value: string;
-} 
+}

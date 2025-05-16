@@ -2,17 +2,15 @@ import { Box } from '@mui/material';
 import React, { useContext, useEffect, useRef, useState } from 'react';
 import { LlmConfig, LlmSettings } from '../../../features/settings/services/LlmSettingsService';
 import {
-    ChatMessage,
-    StreamCompleteCallback,
-    StreamErrorCallback
+    ChatMessage
 } from '../../../services/api/LlmApiService';
 import { Language, translations } from '../../../translations';
 import { AiBotLlmApiService } from '../services/AiBotLlmApiService';
 import { AiBotWorkItemService } from '../services/AiBotWorkItemService';
 import { AiBotInput } from './AiBotInput';
 import { AiBotMessages } from './AiBotMessages';
-import { AiBotWorkItemInfo } from './AiBotWorkItemInfo';
 import { WorkItemContext } from './AiBotWorkItemContextProvider';
+import { AiBotWorkItemInfo } from './AiBotWorkItemInfo';
 
 // Define message type for the AI Bot chat
 export interface AiBotMessage {
@@ -45,6 +43,9 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
   const [workItemContextReady, setWorkItemContextReady] = useState<boolean>(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const responseAccumulatorRef = useRef<string>('');
+  
+  // Add a ref to store the streaming message ID to avoid race conditions
+  const streamingMessageIdRef = useRef<string | number | null>(null);
   
   // Get work item context for the initial prompt
   const { currentWorkItem, parentWorkItem, childWorkItems, isLoading: isWorkItemLoading } = useContext(WorkItemContext);
@@ -134,39 +135,48 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
 
   // Handle stream complete
   const handleStreamComplete = (fullResponse: string) => {
-    console.log("Original Stream complete called with streamingMessageId:", streamingMessageId);
-    if (streamingMessageId === null) {
+    console.log("Original Stream complete called with streamingMessageId ref:", streamingMessageIdRef.current);
+    
+    // Use the ref instead of the state to avoid race conditions
+    const currentStreamingId = streamingMessageIdRef.current;
+    
+    if (currentStreamingId === null) {
       console.log("Skipping stream complete due to null streamingMessageId - forcing isLoading reset");
       // Even if streamingMessageId is null, we should still reset isLoading
       setIsLoading(false);
       return;
     }
     
-    // Ensure newlines are properly formatted
-    const formattedResponse = fullResponse.replace(/\\n/g, '\n');
+    // No longer need to replace newlines as we'll use them for Markdown rendering
+    const formattedResponse = fullResponse;
     
     // Update the final message with the complete response
     setMessages(prevMessages => {
-      const lastMessage = prevMessages[prevMessages.length - 1];
-      if (lastMessage.id === streamingMessageId) {
-        return prevMessages.map(msg =>
-          msg.id === streamingMessageId
-            ? { ...msg, content: formattedResponse, isStreaming: false }
-            : msg
-        );
+      // Find if there's already a message with this ID
+      const messageToUpdate = prevMessages.find(msg => msg.id === currentStreamingId);
+      
+      if (!messageToUpdate) {
+        console.error(`Message with ID ${currentStreamingId} not found in state during completion`);
+        return [
+          ...prevMessages,
+          {
+            id: currentStreamingId,
+            role: 'assistant',
+            content: formattedResponse,
+            isStreaming: false
+          }
+        ];
       }
-      return [
-        ...prevMessages,
-        {
-          id: streamingMessageId,
-          role: 'assistant',
-          content: formattedResponse,
-          isStreaming: false
-        }
-      ];
+      
+      return prevMessages.map(msg =>
+        msg.id === currentStreamingId
+          ? { ...msg, content: formattedResponse, isStreaming: false }
+          : msg
+      );
     });
     
     // Reset all streaming and loading states
+    streamingMessageIdRef.current = null;
     setStreamingMessageId(null);
     console.log("Setting isLoading to false");
     setIsLoading(false);
@@ -182,37 +192,53 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     if (abortControllerRef.current) {
       abortControllerRef.current = null;
     }
-
-    // Force re-render to ensure UI update
-    setTimeout(() => {
-      console.log("After stream complete - isLoading:", isLoading);
-    }, 0);
   };
 
   // Handle stream error
   const handleStreamError = (error: Error) => {
     console.error('Streaming error:', error);
     
-    if (streamingMessageId === null) return;
+    // Use the ref instead of the state to avoid race conditions
+    const currentStreamingId = streamingMessageIdRef.current;
     
     // Ensure error message has proper newlines
     const errorMessage = `Error: ${error.message}. Please try again.`.replace(/\\n/g, '\n');
     
-    setMessages(prevMessages => [
-      ...prevMessages,
-      {
-        id: Date.now(),
-        role: 'assistant',
-        content: errorMessage,
-        isStreaming: false
-      }
-    ]);
+    if (currentStreamingId) {
+      // Update the existing streaming message with the error
+      setMessages(prevMessages => prevMessages.map(msg => 
+        msg.id === currentStreamingId
+          ? { 
+              ...msg, 
+              content: errorMessage,
+              isStreaming: false 
+            }
+          : msg
+      ));
+    } else {
+      // If there's no streaming message (unlikely), create a new error message
+      setMessages(prevMessages => [
+        ...prevMessages,
+        {
+          id: Date.now(),
+          role: 'assistant',
+          content: errorMessage,
+          isStreaming: false
+        }
+      ]);
+    }
     
+    // Reset all streaming and loading states
+    streamingMessageIdRef.current = null;
     setStreamingMessageId(null);
     console.log("Setting isLoading to false on error");
     setIsLoading(false);
     responseAccumulatorRef.current = '';
-    abortControllerRef.current = null;
+    
+    // Clear abort controller
+    if (abortControllerRef.current) {
+      abortControllerRef.current = null;
+    }
   };
 
   // Handle stop generation
@@ -222,15 +248,21 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       
-      if (streamingMessageId !== null) {
+      // Use the ref to access the streaming message ID
+      const currentStreamingId = streamingMessageIdRef.current;
+      
+      if (currentStreamingId !== null) {
+        // Mark the message as no longer streaming
         setMessages(prevMessages =>
           prevMessages.map(msg =>
-            msg.id === streamingMessageId
+            msg.id === currentStreamingId
               ? { ...msg, isStreaming: false }
               : msg
           )
         );
         
+        // Clear streaming state
+        streamingMessageIdRef.current = null;
         setStreamingMessageId(null);
         console.log("Setting isLoading to false after manual stop");
         setIsLoading(false);
@@ -280,8 +312,23 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
     try {
       console.log("Starting message generation - setting isLoading to true");
       setIsLoading(true);
-      setStreamingMessageId(responseMessageId);
+      
+      // Reset accumulator and abort controller
       responseAccumulatorRef.current = '';
+      
+      // Create a temporary loading message
+      const loadingMessageId = responseMessageId;
+      
+      // Add a loading message
+      setMessages(prevMessages => [
+        ...prevMessages,
+        {
+          id: loadingMessageId,
+          role: 'assistant',
+          content: '...',
+          isStreaming: true
+        }
+      ]);
       
       // ALWAYS generate a fresh work item context for each message to ensure it's included
       let updatedHistory: ChatMessage[] = [];
@@ -311,11 +358,6 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
           console.log(workItemPrompt);
           console.log("==== END WORK ITEM CONTEXT FOR MESSAGE ====");
           
-          console.log("Adding work item context to message history:", {
-            hasWorkItemSection: workItemPrompt.includes("CURRENT WORK ITEM"),
-            contextLength: workItemPrompt.length
-          });
-          
           // Add system message with work item details first
           updatedHistory.push({ role: 'system', content: workItemPrompt });
         } else {
@@ -330,16 +372,6 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
               childWorkItems,
               currentLanguage
             );
-            
-            // Log the work item context
-            console.log("==== FRESH WORK ITEM CONTEXT FOR MESSAGE ====");
-            console.log(workItemPrompt);
-            console.log("==== END WORK ITEM CONTEXT FOR MESSAGE ====");
-            
-            console.log("Adding work item context to message history:", {
-              hasWorkItemSection: workItemPrompt.includes("CURRENT WORK ITEM"),
-              contextLength: workItemPrompt.length
-            });
             
             // Add system message with work item details first
             updatedHistory.push({ role: 'system', content: workItemPrompt });
@@ -376,142 +408,113 @@ export const AiBotChat: React.FC<AiBotChatProps> = ({
       // Finally add the new user message
       updatedHistory.push({ role: 'user', content: prompt });
       
-      // Update LLM history with the new history that includes fresh work item context
-      setLlmHistory(updatedHistory);
+      // Use the new non-streaming API call
+      console.log(`Fetching complete response with provider: ${currentLlm.provider}`);
       
-      console.log("Final message history being sent:", JSON.stringify(updatedHistory.map(msg => ({
-        role: msg.role,
-        contentPreview: msg.content.substring(0, 50) + (msg.content.length > 50 ? '...' : '')
-      }))));
-      
-      // Setup abort controller
-      abortControllerRef.current = new AbortController();
-      
-      // Call LLM API with streaming
-      console.log(`Streaming message with provider: ${currentLlm.provider}`);
-      
-      const streamCompleteWrapper: StreamCompleteCallback = (fullResponse) => {
-        console.log("Stream complete wrapper called with response ID:", responseMessageId);
-        // Use the captured responseMessageId instead of relying on streamingMessageId state
-        handleStreamCompleteWithId(fullResponse, responseMessageId);
-      };
-      
-      const streamErrorWrapper: StreamErrorCallback = (error) => {
-        console.log("Stream error wrapper called");
-        handleStreamError(error);
-      };
-      
-      await AiBotLlmApiService.streamChatToLlm(
+      // Call the new non-streaming method
+      const fullResponse = await AiBotLlmApiService.fetchCompleteChatResponse(
         currentLlm,
         prompt,
         currentLanguage,
-        updateStreamingMessage,
-        streamCompleteWrapper,
-        streamErrorWrapper,
-        abortControllerRef.current,
         updatedHistory
       );
+      
+      console.log("Received complete response:", fullResponse.substring(0, 100) + "...");
+      
+      // Update the message with the complete response
+      setMessages(prevMessages => {
+        // Find the loading message
+        const loadingIndex = prevMessages.findIndex(
+          msg => msg.id === loadingMessageId
+        );
+        
+        if (loadingIndex !== -1) {
+          // Replace the loading message with the complete response
+          return prevMessages.map((msg, index) =>
+            index === loadingIndex
+              ? { 
+                  id: loadingMessageId, 
+                  role: 'assistant', 
+                  content: fullResponse, 
+                  isStreaming: false 
+                }
+              : msg
+          );
+        } else {
+          // If loading message wasn't found, add a new message
+          return [
+            ...prevMessages,
+            {
+              id: loadingMessageId,
+              role: 'assistant',
+              content: fullResponse,
+              isStreaming: false
+            }
+          ];
+        }
+      });
+      
+      // Update LLM history
+      setLlmHistory(prevHistory => [
+        ...prevHistory,
+        { role: 'assistant' as const, content: fullResponse }
+      ]);
+      
+      // Set loading to false
+      setIsLoading(false);
     } catch (error) {
       console.error('Error calling LLM API:', error);
-      handleStreamError(error instanceof Error ? error : new Error(String(error)));
+      
+      // Show error message
+      setMessages(prevMessages => {
+        // Find if there's a loading message to replace
+        const loadingIndex = prevMessages.findIndex(
+          msg => msg.role === 'assistant' && msg.isStreaming === true
+        );
+        
+        const errorMessage = `Error: ${error instanceof Error ? error.message : String(error)}. Please try again.`;
+        
+        if (loadingIndex !== -1) {
+          // Replace the loading message with the error
+          return prevMessages.map((msg, index) =>
+            index === loadingIndex
+              ? { 
+                  id: msg.id, 
+                  role: 'assistant', 
+                  content: errorMessage, 
+                  isStreaming: false 
+                }
+              : msg
+          );
+        } else {
+          // If no loading message, add a new error message
+          return [
+            ...prevMessages,
+            {
+              id: Date.now(),
+              role: 'assistant',
+              content: errorMessage,
+              isStreaming: false
+            }
+          ];
+        }
+      });
+      
+      // Set loading to false
+      setIsLoading(false);
     }
   };
 
-  // Update streaming message with new content
+  // We can keep this function for React's state consistency, but it won't be used for streaming
   const updateStreamingMessage = (content: string) => {
-    // Log the received chunk for debugging
-    console.log(`Received streaming chunk: ${content.length > 50 ? content.substring(0, 50) + '...' : content}`);
-    
-    // Ensure newlines are properly formatted
-    const formattedContent = content.replace(/\\n/g, '\n');
-    
-    // Accumulate the response
-    responseAccumulatorRef.current += formattedContent;
-
-    // Create or update the streaming message
-    setMessages(prevMessages => {
-      // Check if there is already an assistant message that we can update
-      const assistantMessageIndex = prevMessages.findIndex(
-        msg => msg.role === 'assistant' && (msg.isStreaming === true || msg.id === streamingMessageId)
-      );
-      
-      if (assistantMessageIndex !== -1) {
-        // Update existing message
-        console.log("Updating existing assistant message");
-        return prevMessages.map((msg, index) => 
-          index === assistantMessageIndex
-            ? { ...msg, content: responseAccumulatorRef.current, isStreaming: true }
-            : msg
-        );
-      } else {
-        // Create new streaming message if none exists
-        console.log("Creating new assistant message with ID:", streamingMessageId);
-        return [
-          ...prevMessages,
-          {
-            id: streamingMessageId || Date.now(),
-            role: 'assistant',
-            content: formattedContent,
-            isStreaming: true
-          }
-        ];
-      }
-    });
+    // This function is now a no-op as we're using a non-streaming approach
+    console.log("Streaming update ignored - using non-streaming API");
   };
 
-  // New function that uses a specific message ID rather than relying on state
+  // Update this function to work with the non-streaming approach (kept for compatibility)
   const handleStreamCompleteWithId = (fullResponse: string, messageId: string | number) => {
-    console.log("Stream complete with specific ID:", messageId);
-    
-    // Ensure newlines are properly formatted
-    const formattedResponse = fullResponse.replace(/\\n/g, '\n');
-    
-    // Update the message with the complete response
-    setMessages(prevMessages => {
-      // Find if there's already a message with this ID or an assistant message that is streaming
-      const assistantMessageIndex = prevMessages.findIndex(
-        msg => (msg.id === messageId || (msg.role === 'assistant' && msg.isStreaming === true))
-      );
-      
-      if (assistantMessageIndex !== -1) {
-        // Update existing message
-        console.log("Completing existing assistant message at index:", assistantMessageIndex);
-        return prevMessages.map((msg, index) =>
-          index === assistantMessageIndex
-            ? { ...msg, id: messageId, content: formattedResponse, isStreaming: false }
-            : msg
-        );
-      } else {
-        // Create new message if somehow none exists (this should rarely happen)
-        console.log("No existing message found to complete, creating new one");
-        return [
-          ...prevMessages,
-          {
-            id: messageId,
-            role: 'assistant',
-            content: formattedResponse,
-            isStreaming: false
-          }
-        ];
-      }
-    });
-    
-    // Reset all streaming and loading states
-    setStreamingMessageId(null);
-    console.log("Setting isLoading to false (handleStreamCompleteWithId)");
-    setIsLoading(false);
-    responseAccumulatorRef.current = '';
-    
-    // Update LLM history
-    setLlmHistory(prevHistory => [
-      ...prevHistory,
-      { role: 'assistant' as const, content: formattedResponse }
-    ]);
-    
-    // Clear abort controller
-    if (abortControllerRef.current) {
-      abortControllerRef.current = null;
-    }
+    console.log("Stream complete handler called but using non-streaming approach");
+    // This is now a no-op as we handle the complete response directly in handleSendMessage
   };
 
   return (

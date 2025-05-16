@@ -2,6 +2,7 @@ import { getClient } from 'azure-devops-extension-api';
 import { WebApiTeam } from 'azure-devops-extension-api/Core';
 import { JsonPatchDocument, Operation } from 'azure-devops-extension-api/WebApi';
 import { WorkItemTrackingRestClient, WorkItemType, WorkItemTypeFieldWithReferences } from 'azure-devops-extension-api/WorkItemTracking';
+import { marked } from 'marked'; // Import marked for Markdown to HTML conversion
 import { AzureDevOpsSdkService } from '../sdk/AzureDevOpsSdkService';
 
 // Work item interface matching our form component
@@ -337,7 +338,7 @@ export class WorkItemService {
       {
         op: Operation.Add,
         path: '/fields/System.Description',
-        value: workItem.description
+        value: workItem.description ? marked(workItem.description) : ''
       },
       {
         op: Operation.Add,
@@ -376,7 +377,7 @@ export class WorkItemService {
       patchDocument.push({
         op: Operation.Add,
         path: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria',
-        value: acceptanceCriteriaValue
+        value: marked(acceptanceCriteriaValue) // Convert Markdown to HTML for acceptance criteria
       });
       console.log(`[WorkItemService] Added acceptance criteria field with length ${acceptanceCriteriaValue.length}`);
     }
@@ -404,10 +405,17 @@ export class WorkItemService {
     }
     
     // Add team context
+    console.log(`[WorkItemService] Setting AreaPath with - Project: "${projectName}", Team: "${teamContext.name}", Full value: "${projectName}\\${teamContext.name}"`);
+    
+    // Ensure team context has a valid name before adding it to area path
+    const areaPath = teamContext && teamContext.name 
+      ? `${projectName}\\${teamContext.name}`
+      : projectName;
+      
     patchDocument.push({
       op: Operation.Add,
       path: '/fields/System.AreaPath',
-      value: `${projectName}\\${teamContext.name}`
+      value: areaPath
     });
     
     // Create the work item
@@ -501,4 +509,4 @@ export class WorkItemService {
     
     return key;
   }
-} 
+}

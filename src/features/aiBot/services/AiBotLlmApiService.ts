@@ -33,6 +33,9 @@ export class AiBotLlmApiService {
       onError(new Error("LLM provider, API URL, or API Token not configured correctly."));
       return Promise.reject(new Error("Invalid LLM configuration"));
     }
+    
+    // Reset the text buffer at the start of a new stream request
+    this._textBuffer = '';
 
     let requestUrl = config.apiUrl;
     let requestBody: any;
@@ -121,6 +124,22 @@ export class AiBotLlmApiService {
                   }
                 }
                 
+                // Force a final flush of any buffered text fragments with a short delay
+                if (this._textBuffer && this._textBuffer.length > 0) {
+                  console.log(`Flushing final buffer content: "${this._textBuffer}"`);
+                  // Add the remaining buffer content directly to the full response
+                  fullResponse += this._textBuffer;
+                  // Send the remaining buffer as a chunk
+                  onChunk(this._textBuffer);
+                  // Clear the buffer
+                  this._textBuffer = '';
+                  // Clear any pending timer
+                  if (this._bufferTimer) {
+                    clearTimeout(this._bufferTimer);
+                    this._bufferTimer = null;
+                  }
+                }
+                
                 // Stream complete, call the complete callback
                 onComplete(fullResponse);
                 return Promise.resolve();
@@ -155,8 +174,8 @@ export class AiBotLlmApiService {
 
             // Function to process buffered data and extract JSON objects
             const processBufferedData = (buffer: string) => {
-              // Log raw buffer for debugging
-              console.debug("Processing buffer:", buffer.substring(0, 100) + (buffer.length > 100 ? "..." : ""));
+              // Log raw buffer for debugging (truncated to avoid huge logs)
+              // console.debug("Processing buffer:", buffer.substring(0, 100) + (buffer.length > 100 ? "..." : ""));
               
               let foundValidContent = false;
               
@@ -171,13 +190,22 @@ export class AiBotLlmApiService {
                   if (match) {
                     const data = JSON.parse(match[1]);
                     
-                    // Extract content if available
+                    // Extract content if available - use our preserveMarkdownFormatting function
                     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
                       const text = data.candidates[0].content.parts[0].text;
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Found valid content in JSON: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                      const processedText = this.preserveMarkdownFormatting(text);
+                      
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        fullResponse += processedText;
+                        onChunk(processedText);
+                        foundValidContent = true;
+                        console.log(`Found valid content in JSON: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
+                      }
                     }
                   }
                 } catch (e) {
@@ -192,12 +220,27 @@ export class AiBotLlmApiService {
                 if (textMatches) {
                   for (const match of textMatches) {
                     try {
-                      const text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
-                      if (text) {
-                        fullResponse += text;
-                        onChunk(text);
+                      // Extract text and trim leading space that might be causing formatting issues
+                      let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      
+                      const processedText = this.preserveMarkdownFormatting(text);
+                      
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        // Only trim leading space if this isn't the first chunk
+                        if (fullResponse.length > 0 && processedText.startsWith(' ')) {
+                          fullResponse += processedText.substring(1);
+                          onChunk(processedText.substring(1));
+                        } else {
+                          fullResponse += processedText;
+                          onChunk(processedText);
+                        }
                         foundValidContent = true;
-                        console.log(`Found content via regex: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                        console.log(`Found content via regex: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
                       }
                     } catch (e) {
                       // Ignore extraction errors
@@ -206,13 +249,13 @@ export class AiBotLlmApiService {
                 }
               }
               
-              // If buffer is getting too large, clear it to prevent memory issues
-              if (buffer.length > 10000) {
-                console.warn("Buffer too large, clearing");
-                return "";
+              // If we found valid content but didn't flush anything, schedule a delayed flush 
+              // to ensure small fragments eventually get sent
+              if (foundValidContent && this._textBuffer && this._textBuffer.length > 0) {
+                this._scheduleBufferFlush(onChunk);
               }
               
-              return buffer;
+              return foundValidContent;
             };
             
             // Function to clean buffer by removing processed data
@@ -428,6 +471,22 @@ export class AiBotLlmApiService {
                   }
                 }
                 
+                // Force a final flush of any buffered text fragments with a short delay
+                if (this._textBuffer && this._textBuffer.length > 0) {
+                  console.log(`Flushing final buffer content: "${this._textBuffer}"`);
+                  // Add the remaining buffer content directly to the full response
+                  fullResponse += this._textBuffer;
+                  // Send the remaining buffer as a chunk
+                  onChunk(this._textBuffer);
+                  // Clear the buffer
+                  this._textBuffer = '';
+                  // Clear any pending timer
+                  if (this._bufferTimer) {
+                    clearTimeout(this._bufferTimer);
+                    this._bufferTimer = null;
+                  }
+                }
+                
                 // Stream complete, call the complete callback
                 onComplete(fullResponse);
                 return Promise.resolve();
@@ -471,13 +530,22 @@ export class AiBotLlmApiService {
                   if (match) {
                     const data = JSON.parse(match[1]);
                     
-                    // Extract content if available
+                    // Extract content if available - use our preserveMarkdownFormatting function
                     if (data.candidates?.[0]?.content?.parts?.[0]?.text) {
                       const text = data.candidates[0].content.parts[0].text;
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Found valid content in JSON: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                      const processedText = this.preserveMarkdownFormatting(text);
+                      
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        fullResponse += processedText;
+                        onChunk(processedText);
+                        foundValidContent = true;
+                        console.log(`Found valid content in JSON: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
+                      }
                     }
                   }
                 } catch (e) {
@@ -492,12 +560,27 @@ export class AiBotLlmApiService {
                 if (textMatches) {
                   for (const match of textMatches) {
                     try {
-                      const text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
-                      if (text) {
-                        fullResponse += text;
-                        onChunk(text);
+                      // Extract text and trim leading space that might be causing formatting issues
+                      let text = match.replace(/"text"\s*:\s*"/, '').replace(/"$/, '');
+                      
+                      const processedText = this.preserveMarkdownFormatting(text);
+                      
+                      // Only add to full response and call onChunk if preserveMarkdownFormatting returned content
+                      if (processedText) {
+                        // Only trim leading space if this isn't the first chunk
+                        if (fullResponse.length > 0 && processedText.startsWith(' ')) {
+                          fullResponse += processedText.substring(1);
+                          onChunk(processedText.substring(1));
+                        } else {
+                          fullResponse += processedText;
+                          onChunk(processedText);
+                        }
                         foundValidContent = true;
-                        console.log(`Found content via regex: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
+                        console.log(`Found content via regex: "${processedText.substring(0, 50)}${processedText.length > 50 ? '...' : ''}"`);
+                      } else {
+                        // If nothing was returned, schedule a buffer flush after a delay
+                        this._scheduleBufferFlush(onChunk);
+                        foundValidContent = true;
                       }
                     } catch (e) {
                       // Ignore extraction errors
@@ -506,41 +589,10 @@ export class AiBotLlmApiService {
                 }
               }
               
-              // Third try: if still no content, look for any text between quotes after "text":
-              if (!foundValidContent) {
-                const directTextMatch = buffer.match(/"text"\s*:\s*"(.*?)"/);
-                if (directTextMatch && directTextMatch[1]) {
-                  const text = directTextMatch[1];
-                  fullResponse += text;
-                  onChunk(text);
-                  foundValidContent = true;
-                  console.log(`Extracted direct text: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-                }
-              }
-              
-              // Fourth try: desperate attempt to find any text content
-              if (!foundValidContent && buffer.includes('"text"')) {
-                try {
-                  // Get everything after "text":
-                  const textSection = buffer.split('"text":')[1];
-                  if (textSection) {
-                    // Try to extract the content between the first set of quotes
-                    const quoteMatch = textSection.match(/"([^"]*)"/);
-                    if (quoteMatch && quoteMatch[1]) {
-                      const text = quoteMatch[1];
-                      fullResponse += text;
-                      onChunk(text);
-                      foundValidContent = true;
-                      console.log(`Last resort text extraction: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`);
-                    }
-                  }
-                } catch (e) {
-                  console.warn("Failed in emergency text extraction:", e);
-                }
-              }
-              
-              if (!foundValidContent) {
-                console.warn("No valid content found in buffer");
+              // If we found valid content but didn't flush anything, schedule a delayed flush 
+              // to ensure small fragments eventually get sent
+              if (foundValidContent && this._textBuffer && this._textBuffer.length > 0) {
+                this._scheduleBufferFlush(onChunk);
               }
               
               return foundValidContent;
@@ -609,6 +661,10 @@ export class AiBotLlmApiService {
       onError(new Error('No LLM configuration available'));
       return Promise.reject(new Error('No LLM configuration available'));
     }
+    
+    // Reset the text buffer at the start of a new stream request
+    this._textBuffer = '';
+    this._fullAccumulatedResponse = '';
     
     console.log("DEBUG - streamChatToLlm received message history:", JSON.stringify(messageHistory));
 
@@ -703,6 +759,23 @@ export class AiBotLlmApiService {
     
     // Define custom complete handler
     const completeHandler: StreamCompleteCallback = (finalContent) => {
+      // Check if there's any remaining buffered content
+      if (this._textBuffer && this._textBuffer.length > 0) {
+        console.log(`Flushing remaining buffered content: "${this._textBuffer}"`);
+        
+        // Send any remaining buffered text as a final chunk
+        onChunk(this._textBuffer);
+        
+        // Add to accumulated response for Gemini
+        if (isGemini) {
+          accumulatedResponse += this._textBuffer;
+          finalContent += this._textBuffer;
+        }
+        
+        // Clear buffer
+        this._textBuffer = '';
+      }
+      
       // Make sure we pass the final accumulated content
       onComplete(isGemini ? accumulatedResponse : finalContent);
     };
@@ -722,5 +795,373 @@ export class AiBotLlmApiService {
       onError(error instanceof Error ? error : new Error('Unknown error occurred'));
       return Promise.reject(error);
     }
+  }
+
+  /**
+   * Fetches a complete chat response in a single REST call (non-streaming)
+   */
+  static async fetchCompleteChatResponse(
+    config: LlmConfig,
+    prompt: string,
+    language: string,
+    messageHistory: ChatMessage[] = []
+  ): Promise<string> {
+    if (!config) {
+      throw new Error('No LLM configuration available');
+    }
+    
+    console.log("DEBUG - fetchCompleteChatResponse with message history:", JSON.stringify(messageHistory));
+
+    // Process and combine system messages to ensure work item context is preserved
+    let updatedHistory: ChatMessage[] = [];
+    let combinedSystemContent = '';
+    let nonSystemMessages: ChatMessage[] = [];
+    
+    // First separate system from non-system messages
+    messageHistory.forEach(msg => {
+      if (msg.role === 'system') {
+        // Collect system message content
+        combinedSystemContent += msg.content + '\n\n';
+      } else {
+        // Keep non-system messages
+        nonSystemMessages.push(msg);
+      }
+    });
+    
+    // Make sure combinedSystemContent is not empty and add language instruction
+    if (combinedSystemContent) {
+      // The work item details are already included in the system messages from AiBotWorkItemService
+      // Add language instruction at the end so it doesn't interfere with work item details
+      const languageInstruction = `Please provide your response in ${language} language.`;
+      combinedSystemContent += '\n\n' + languageInstruction;
+    } else {
+      // If no system content (no work item context), just add the language instruction
+      combinedSystemContent = `Please provide your response in ${language} language.`;
+    }
+    
+    // Create a single system message with all the system content
+    if (combinedSystemContent) {
+      updatedHistory.push({
+        role: 'system',
+        content: combinedSystemContent.trim()
+      });
+    }
+    
+    // Add all non-system messages
+    updatedHistory = [...updatedHistory, ...nonSystemMessages];
+
+    // Add the user prompt if not already in history
+    const lastMessageIsUser = messageHistory.length > 0 && 
+                             messageHistory[messageHistory.length - 1].role === 'user';
+    
+    if (!lastMessageIsUser) {
+      updatedHistory.push({
+        role: 'user',
+        content: prompt
+      });
+    }
+
+    // Prepare request based on provider
+    let requestUrl = config.apiUrl;
+    let requestBody: any;
+    const headers: HeadersInit = {
+      'Content-Type': 'application/json',
+    };
+
+    if (!config.provider || !config.apiUrl || !config.apiToken) {
+      throw new Error("LLM provider, API URL, or API Token not configured correctly.");
+    }
+
+    if (config.provider === 'azure-openai' || config.provider === 'openai') {
+      requestBody = JSON.stringify({
+        messages: updatedHistory,
+        temperature: config.temperature ?? 0.7,
+        max_tokens: 4000,
+        stream: false // Explicitly disable streaming
+      });
+      
+      if (config.provider === 'azure-openai') {
+        headers['api-key'] = config.apiToken;
+        if (!requestUrl.includes('api-version=')) {
+          const separator = requestUrl.includes('?') ? '&' : '?';
+          requestUrl += `${separator}api-version=2023-07-01-preview`; 
+        }
+      } else { // openai
+        headers['Authorization'] = `Bearer ${config.apiToken}`;
+        if (!requestUrl.endsWith('/v1/chat/completions')) {
+          if (!requestUrl.endsWith('/')) {
+            requestUrl += '/';
+          }
+          requestUrl += 'v1/chat/completions';
+        }
+      }
+    } else if (config.provider === 'gemini') {
+      // Format history for Gemini (similar to streaming but without stream endpoint)
+      let formattedHistory: any[] = [];
+      
+      // First, check if we have a system message (work item context)
+      const systemMessages = updatedHistory.filter(msg => msg.role === 'system');
+      const nonSystemMessagesFormatted = updatedHistory.filter(msg => msg.role !== 'system');
+      
+      // If we have system messages, add them as a special prefixed user message
+      if (systemMessages.length > 0) {
+        // Combine all system messages
+        let combinedSystemContent = systemMessages.map(msg => msg.content).join('\n\n');
+        
+        // Create a special prefixed message that clearly marks this as system context
+        const prefixedSystemMessage = 
+          "###SYSTEM CONTEXT (IMPORTANT - NOT USER QUERY)###\n\n" + 
+          combinedSystemContent + 
+          "\n\n###END SYSTEM CONTEXT###\n\n" +
+          "Please keep the above context in mind when responding to my questions. My first question is coming next.";
+        
+        // Add as the first user message
+        formattedHistory.push({
+          role: 'user',
+          parts: [{ text: prefixedSystemMessage }]
+        });
+        
+        // Add a model response to acknowledge the system context
+        formattedHistory.push({
+          role: 'model',
+          parts: [{ text: "I'll keep that context in mind when answering your questions." }]
+        });
+      }
+      
+      // Then add all non-system messages with the appropriate role conversion
+      nonSystemMessagesFormatted.forEach(msg => {
+        formattedHistory.push({
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }]
+        });
+      });
+      
+      // Use the regular generateContent endpoint instead of streamGenerateContent
+      if (requestUrl.includes(':streamGenerateContent')) {
+        requestUrl = requestUrl.replace(':streamGenerateContent', ':generateContent');
+      } else if (!requestUrl.includes(':generateContent')) {
+        // If no specific endpoint is included
+        if (requestUrl.includes('/models/')) {
+          // Extract the model name and construct the correct URL
+          const modelMatch = requestUrl.match(/\/models\/([^\/]+)/);
+          if (modelMatch && modelMatch[1]) {
+            const modelName = modelMatch[1];
+            if (requestUrl.endsWith(modelName)) {
+              requestUrl += ':generateContent';
+            } else {
+              const baseUrl = requestUrl.split('/models/')[0];
+              requestUrl = `${baseUrl}/models/${modelName}:generateContent`;
+            }
+          } else {
+            requestUrl += ':generateContent';
+          }
+        } else {
+          // If no model is specified, use gemini-pro as default
+          requestUrl = requestUrl.endsWith('/')
+            ? `${requestUrl}v1beta/models/gemini-pro:generateContent`
+            : `${requestUrl}/v1beta/models/gemini-pro:generateContent`;
+        }
+      }
+
+      // Use the API key directly for Gemini
+      headers['x-goog-api-key'] = config.apiToken;
+
+      requestBody = JSON.stringify({
+        contents: formattedHistory,
+        generationConfig: {
+          temperature: config.temperature ?? 0.7,
+          maxOutputTokens: 4000,
+          topP: 1,
+          topK: 1
+        },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+        ]
+      });
+    } else {
+      throw new Error(`Unsupported provider "${config.provider}" selected.`);
+    }
+
+    // Make the fetch request for the complete response
+    console.log(`Fetching complete response from: ${requestUrl}`);
+    const response = await fetch(requestUrl, {
+      method: 'POST',
+      headers: headers,
+      body: requestBody
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`API request failed with status ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    
+    // Extract and process content based on the provider
+    let content = '';
+    
+    if (config.provider === 'azure-openai' || config.provider === 'openai') {
+      content = data.choices?.[0]?.message?.content || '';
+    } else if (config.provider === 'gemini') {
+      content = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
+
+    // Process escape sequences in the content
+    const processedContent = this.processEscapeSequences(content);
+    return processedContent;
+  }
+
+  // Helper function to process escape sequences in text
+  static processEscapeSequences(text: string): string {
+    if (!text) return '';
+    
+    return text
+      // Handle common escape sequences
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\r/g, '\r')
+      // Handle JSON escapes (quotes, backslashes, etc)
+      .replace(/\\([\\/"'bfnrt])/g, '$1')
+      // Handle double backslashes that might remain
+      .replace(/\\\\/g, '\\')
+      // Handle unicode escape sequences
+      .replace(/\\u([0-9a-fA-F]{4})/g, (match, code) => 
+        String.fromCharCode(parseInt(code, 16))
+      );
+  }
+
+  // Add this function near the processing related functions to handle markdown preservation
+  static preserveMarkdownFormatting(text: string): string {
+    // First, process escape sequences in the text
+    let processedText = text
+      // Handle common escape sequences
+      .replace(/\\n/g, '\n')
+      .replace(/\\t/g, '\t')
+      .replace(/\\r/g, '\r')
+      // Handle JSON escapes (quotes, backslashes, etc)
+      .replace(/\\([\\/"'bfnrt])/g, '$1')
+      // Handle double backslashes that might remain
+      .replace(/\\\\/g, '\\')
+      // Handle unicode escape sequences
+      .replace(/\\u([0-9a-fA-F]{4})/g, (match, code) => 
+        String.fromCharCode(parseInt(code, 16))
+      );
+    
+    // For Gemini API specifically, we need to handle small text fragments better by batching them
+    
+    // Initialize the buffer if needed
+    if (!this._textBuffer) {
+      this._textBuffer = '';
+    }
+    
+    // Initialize the timer if needed
+    if (!this._bufferTimer) {
+      this._bufferTimer = null;
+    }
+    
+    // Add the current processed text to the buffer
+    this._textBuffer += processedText;
+    
+    // Set a maximum buffer size before automatic sending
+    const MAX_BUFFER_SIZE = 100;
+    
+    // Log the received text for debugging
+    console.log(`Received text chunk: "${processedText}" (${processedText.length} chars)`);
+    
+    // Always add to the global accumulated response
+    if (!this._fullAccumulatedResponse) {
+      this._fullAccumulatedResponse = '';
+    }
+    this._fullAccumulatedResponse += processedText;
+    
+    // Don't send fragments immediately in most cases, but batch them
+    const isVerySmallFragment = processedText.length < 10;
+    const hasEnoughBufferedContent = this._textBuffer.length >= MAX_BUFFER_SIZE;
+    const isSentenceBreak = Boolean(processedText.match(/[.!?:;]\s*$/));
+    const hasMarkdownFormatting = Boolean(processedText.match(/[*_#>`\[\]]/));
+    const hasNewlines = processedText.includes('\n');
+    
+    // Almost always buffer, except in specific cases
+    if (!hasEnoughBufferedContent && !isSentenceBreak && !hasNewlines && (isVerySmallFragment || !hasMarkdownFormatting)) {
+      console.log(`🔄 Buffering: "${processedText}" (buffer size: ${this._textBuffer.length}/${MAX_BUFFER_SIZE} chars)`);
+      
+      // If we have a pending flush, clear it and set a new one
+      if (this._bufferTimer) {
+        clearTimeout(this._bufferTimer);
+      }
+      
+      // Always schedule a flush after a shorter delay to ensure content isn't held too long
+      this._scheduleBufferFlush(this._lastChunkCallback, 150);
+      
+      // Return empty string so the chunk isn't sent yet
+      return '';
+    }
+    
+    // If we've accumulated enough content, send it
+    if (this._textBuffer.length > 0) {
+      console.log(`✅ Sending buffer: "${this._textBuffer.substring(0, 30)}${this._textBuffer.length > 30 ? '...' : ''}" (${this._textBuffer.length} chars)`);
+      
+      // Get the accumulated text
+      const bufferToSend = this._textBuffer;
+      
+      // Clear the buffer for future text
+      this._textBuffer = '';
+      
+      // Clear any pending buffer flush
+      if (this._bufferTimer) {
+        clearTimeout(this._bufferTimer);
+        this._bufferTimer = null;
+      }
+      
+      // Return the accumulated text
+      return bufferToSend;
+    }
+    
+    // Default case - return processed text as is
+    return processedText;
+  }
+  
+  // Static buffer for accumulating text fragments
+  private static _textBuffer: string = '';
+  
+  // Timer for flushing the buffer after a delay
+  private static _bufferTimer: NodeJS.Timeout | null = null;
+  
+  // Keep track of the last chunk callback
+  private static _lastChunkCallback: StreamChunkCallback | null = null;
+  
+  // Keep the full accumulated response to ensure we don't lose any chunks
+  private static _fullAccumulatedResponse: string = '';
+  
+  // Helper method to flush the buffer after a delay
+  private static _scheduleBufferFlush(onChunk: StreamChunkCallback | null, delayMs: number = 100): void {
+    // Store the callback for future use
+    if (onChunk) {
+      this._lastChunkCallback = onChunk;
+    }
+    
+    // If no callback is available, we can't flush
+    if (!this._lastChunkCallback) {
+      console.warn("No chunk callback available to flush buffer");
+      return;
+    }
+    
+    // Clear any existing timer
+    if (this._bufferTimer) {
+      clearTimeout(this._bufferTimer);
+    }
+    
+    // Set a new timer to flush the buffer
+    this._bufferTimer = setTimeout(() => {
+      if (this._textBuffer && this._textBuffer.length > 0 && this._lastChunkCallback) {
+        console.log(`⏱️ Flushing buffer after ${delayMs}ms delay: "${this._textBuffer.substring(0, 30)}${this._textBuffer.length > 30 ? '...' : ''}" (${this._textBuffer.length} chars)`);
+        this._lastChunkCallback(this._textBuffer);
+        this._textBuffer = '';
+      }
+      this._bufferTimer = null;
+    }, delayMs);
   }
 } 

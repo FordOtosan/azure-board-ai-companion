@@ -1,27 +1,28 @@
 import {
-    CheckCircleOutline as AcceptanceIcon,
-    Add as AddIcon,
-    Delete as DeleteIcon,
-    Edit as EditIcon,
-    ExpandMore,
-    FormatListBulleted as ListIcon,
-    AutoFixHigh as RefineIcon,
-    Subject as SubjectIcon
+  CheckCircleOutline as AcceptanceIcon,
+  Add as AddIcon,
+  Delete as DeleteIcon,
+  Edit as EditIcon,
+  ExpandMore,
+  FormatListBulleted as ListIcon,
+  AutoFixHigh as RefineIcon,
+  Subject as SubjectIcon
 } from '@mui/icons-material';
 import {
-    Accordion,
-    AccordionDetails,
-    AccordionSummary,
-    Box,
-    Button,
-    CircularProgress,
-    IconButton,
-    Paper,
-    TextField,
-    Tooltip,
-    Typography,
-    useTheme
+  Accordion,
+  AccordionDetails,
+  AccordionSummary,
+  Box,
+  Button,
+  CircularProgress,
+  IconButton,
+  Paper,
+  TextField,
+  Tooltip,
+  Typography,
+  useTheme
 } from '@mui/material';
+import MDEditor from '@uiw/react-md-editor';
 import * as React from 'react';
 import { TeamWorkItemConfig } from '../../../features/settings/services/WorkItemSettingsService';
 import { Language } from '../../../translations';
@@ -46,6 +47,7 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
   teamMapping
 }) => {
   const theme = useTheme();
+  const themeMode = theme.palette.mode;
   const T = getTranslations(currentLanguage);
   
   const { 
@@ -438,21 +440,15 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
                   </IconButton>
                 </Tooltip>
               </Box>
-              <TextField
-                fullWidth
-                multiline
-                rows={3}
-                value={item.description}
-                onChange={(e) => handleFieldChange('description', e.target.value)}
-                variant="outlined"
-                sx={{
-                  '& .MuiOutlinedInput-root': {
-                    '& fieldset': {
-                      borderColor: theme.palette.divider
-                    }
-                  }
-                }}
-              />
+              
+              <div data-color-mode={themeMode}>
+                <MDEditor
+                  value={item.description}
+                  onChange={(value) => handleFieldChange('description', value || '')}
+                  height={150}
+                  preview="edit"
+                />
+              </div>
             </Box>
             
             {/* Acceptance Criteria Field - only for User Stories or when explicitly defined */}
@@ -493,37 +489,30 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
                   </Box>
                 </Box>
                 
-                <TextField
-                  fullWidth
-                  multiline
-                  minRows={2}
-                  maxRows={6}
-                  variant="outlined"
-                  size="small"
-                  placeholder={isUserStory || isProductBacklogItem ? 
-                    `Define acceptance criteria for this ${item.type}...` : 
-                    T.acceptanceCriteria
-                  }
-                  value={
-                    // Get acceptance criteria from main property or additionalFields
-                    item.acceptanceCriteria || 
-                    (item.additionalFields && item.additionalFields['Acceptance Criteria']) || 
-                    ''
-                  }
-                  onChange={(e) => {
-                    // Update the main property and remove from additionalFields if exists
-                    const updatedItem = { ...item, acceptanceCriteria: e.target.value };
-                    if (updatedItem.additionalFields && updatedItem.additionalFields['Acceptance Criteria']) {
-                      const newAdditionalFields = {...updatedItem.additionalFields};
-                      delete newAdditionalFields['Acceptance Criteria'];
-                      updatedItem.additionalFields = Object.keys(newAdditionalFields).length > 0 
-                        ? newAdditionalFields : undefined;
+                <div data-color-mode={themeMode}>
+                  <MDEditor
+                    value={
+                      // Get acceptance criteria from main property or additionalFields
+                      item.acceptanceCriteria || 
+                      (item.additionalFields && item.additionalFields['Acceptance Criteria']) || 
+                      ''
                     }
-                    const newWorkItems = updateWorkItemAtPath(workItems, path, updatedItem);
-                    setWorkItems(newWorkItems);
-                  }}
-                  sx={{ mb: 1 }}
-                />
+                    onChange={(value) => {
+                      // Update the main property and remove from additionalFields if exists
+                      const updatedItem = { ...item, acceptanceCriteria: value || '' };
+                      if (updatedItem.additionalFields && updatedItem.additionalFields['Acceptance Criteria']) {
+                        const newAdditionalFields = {...updatedItem.additionalFields};
+                        delete newAdditionalFields['Acceptance Criteria'];
+                        updatedItem.additionalFields = Object.keys(newAdditionalFields).length > 0 
+                          ? newAdditionalFields : undefined;
+                      }
+                      const newWorkItems = updateWorkItemAtPath(workItems, path, updatedItem);
+                      setWorkItems(newWorkItems);
+                    }}
+                    height={150}
+                    preview="edit"
+                  />
+                </div>
                 
                 {!item.acceptanceCriteria && 
                  !(item.additionalFields && item.additionalFields['Acceptance Criteria']) && 
@@ -680,4 +669,4 @@ export const WorkItemCard: React.FC<WorkItemCardProps> = ({
       </Accordion>
     </Paper>
   );
-}; 
+};
