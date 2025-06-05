@@ -289,33 +289,12 @@ export class WorkItemSettingsService {
     
     // Common hierarchy patterns, ordered by priority
     const commonHierarchies: [string, string][] = [
-      // Priority hierarchy 1: EPIC -> FEATURE -> STORY -> TASK
+      // Epic -> Feature -> Product Backlog Item -> Task/Bug
       ['Epic', 'Feature'],
-      ['Feature', 'User Story'],
-      ['User Story', 'Task'],
-      
-      // Priority hierarchy 2: BUG -> TASK
-      ['Bug', 'Task'],
-      
-      // Other important hierarchy paths
       ['Feature', 'Product Backlog Item'],
       ['Product Backlog Item', 'Task'],
       ['Product Backlog Item', 'Bug'],
-      ['User Story', 'Bug'],
-      
-      // Additional supported hierarchies
-      ['Initiative', 'Epic'],
-      ['Theme', 'Epic'],
-      ['Epic', 'Capability'],
-      ['Capability', 'Feature'],
-      ['Epic', 'Story'],
-      ['Story', 'Task'],
-      ['Feature', 'Story'],
-      ['Epic', 'User Story'],
-      ['Epic', 'Product Backlog Item'],
-      ['Feature', 'Bug'],
-      ['Test Case', 'Bug'],
-      ['Feature', 'Test Case']
+      ['Feature', 'Bug']
     ];
     
     // Check for common hierarchies
@@ -526,21 +505,19 @@ export class WorkItemSettingsService {
       }));
     }
     
+    // Always detect hierarchies when saving a mapping
+    const detectedHierarchies = this.detectHierarchiesFromTypes(mapping.workItemTypes);
+    const updatedMapping = {
+      ...mapping,
+      hierarchies: detectedHierarchies
+    };
+    
     if (existingIndex >= 0) {
       // Update existing mapping
-      updatedSettings.mappings[existingIndex] = mapping;
+      updatedSettings.mappings[existingIndex] = updatedMapping;
     } else {
       // Add new mapping
-      updatedSettings.mappings.push(mapping);
-    }
-    
-    // Detect hierarchies if not already present
-    if (!mapping.hierarchies || mapping.hierarchies.length === 0) {
-      if (existingIndex >= 0) {
-        updatedSettings.mappings[existingIndex].hierarchies = this.detectHierarchiesFromTypes(mapping.workItemTypes);
-      } else {
-        updatedSettings.mappings[updatedSettings.mappings.length - 1].hierarchies = this.detectHierarchiesFromTypes(mapping.workItemTypes);
-      }
+      updatedSettings.mappings.push(updatedMapping);
     }
     
     return updatedSettings;

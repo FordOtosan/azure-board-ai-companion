@@ -1,24 +1,24 @@
 import {
-  Assessment,
-  Error as ErrorIcon,
-  NoteAdd
+    Assessment,
+    Error as ErrorIcon,
+    NoteAdd
 } from '@mui/icons-material';
 import {
-  Alert,
-  Box,
-  Button,
-  CircularProgress,
-  Container,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Fade,
-  Paper,
-  Slide,
-  Snackbar,
-  Typography,
-  useTheme
+    Alert,
+    Box,
+    Button,
+    CircularProgress,
+    Container,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    Fade,
+    Paper,
+    Slide,
+    Snackbar,
+    Typography,
+    useTheme
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { WebApiTeam } from 'azure-devops-extension-api/Core'; // Restore team type import
@@ -73,10 +73,10 @@ const ChatPage: React.FC = () => {
   const [currentLanguage, setCurrentLanguage] = React.useState<Language>('en');
   const [messages, setMessages] = React.useState<Message[]>([]); // State for chat messages
   const [isLoadingResponse, setIsLoadingResponse] = React.useState(false); // For LLM loading state
-  const [streamingMessageId, setStreamingMessageId] = React.useState<string | number | null>(null); // Keep track of currently streaming message
+  const [streamingMessageId, setStreamingMessageId] = React.useState<number | null>(null); // Keep track of currently streaming message
   
   // Create a ref to store the streaming message ID to avoid race conditions
-  const streamingMessageIdRef = React.useRef<string | number | null>(null);
+  const streamingMessageIdRef = React.useRef<number | null>(null);
 
   // Theme for styling
   const theme = useTheme();
@@ -340,6 +340,13 @@ const ChatPage: React.FC = () => {
       document.removeEventListener('testPlanCreated', handleTestPlanCreated);
     };
   }, []);
+
+  // Update workItemSysPrompt when llmSettings changes
+  React.useEffect(() => {
+    if (llmSettings) {
+      setWorkItemSysPrompt(llmSettings.createWorkItemPlanSystemPrompt || '');
+    }
+  }, [llmSettings]);
 
   // --- Handlers ---
   const handleTeamSelect = (team: WebApiTeam) => {
@@ -749,7 +756,9 @@ const ChatPage: React.FC = () => {
         prompt, 
         undefined, 
         updatedHistory,
-        teamWorkItemMapping || teamMapping // Use the mapping with hierarchies if available, fall back to teamMapping
+        teamWorkItemMapping || teamMapping, // Use the mapping with hierarchies if available, fall back to teamMapping
+        currentLanguage,
+        workItemSysPrompt // Pass the system prompt from settings
       );
       handleStreamComplete(response);
       setCanStopGeneration(false);
@@ -757,8 +766,59 @@ const ChatPage: React.FC = () => {
       // Add assistant response to history
       setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
     } catch (error) {
-      handleStreamError(error as Error);
+      handleStreamError(error instanceof Error ? error : new Error(String(error)));
       setCanStopGeneration(false);
+    }
+  };
+
+  // Helper function to send high-level plan as a new message instead of updating an existing one
+  const sendHighLevelPlanAsNewMessage = async (prompt: string) => {
+    if (!prompt.trim() || !llmSettings || !currentLlm) return;
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+
+    try {
+      // Add user message to LLM history but don't show it in the UI
+      const newUserMessage: ChatMessage = { 
+        role: 'user', 
+        content: prompt
+      };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
+      
+      // Generate the plan with team configuration for work item types
+      const response = await HighLevelPlanService.generateHighLevelPlan(
+        currentLlm, 
+        prompt, 
+        undefined, 
+        updatedHistory,
+        teamWorkItemMapping || teamMapping, // Use the mapping with hierarchies if available, fall back to teamMapping
+        currentLanguage,
+        workItemSysPrompt // Pass the system prompt from settings
+      );
+      
+      // Create a new message for the plan
+      const planMessage: Message = {
+        id: Date.now(),
+        role: 'assistant',
+        content: response
+      };
+      
+      // Add the plan message to the chat
+      setMessages(prev => [...prev, planMessage]);
+      
+      // Add assistant response to history
+      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now(),
+        role: 'assistant',
+        content: `⚠️ Error generating plan: ${error instanceof Error ? error.message : String(error)}`
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
   };
 
@@ -826,55 +886,6 @@ const ChatPage: React.FC = () => {
     })();
   };
   
-  // Helper function to send high-level plan as a new message instead of updating an existing one
-  const sendHighLevelPlanAsNewMessage = async (prompt: string) => {
-    if (!prompt.trim() || !llmSettings || !currentLlm) return;
-    
-    // Create new AbortController for this request
-    abortControllerRef.current = new AbortController();
-
-    try {
-      // Add user message to LLM history but don't show it in the UI
-      const newUserMessage: ChatMessage = { 
-        role: 'user', 
-        content: prompt
-      };
-      const updatedHistory = [...llmHistory, newUserMessage];
-      
-      // Update the history state immediately to include this message
-      setLlmHistory(updatedHistory);
-      
-      // Generate the plan with team configuration for work item types
-      const response = await HighLevelPlanService.generateHighLevelPlan(
-        currentLlm, 
-        prompt, 
-        undefined, 
-        updatedHistory,
-        teamWorkItemMapping || teamMapping // Use the mapping with hierarchies if available, fall back to teamMapping
-      );
-      
-      // Create a new message for the plan
-      const planMessage: Message = {
-        id: Date.now(),
-        role: 'assistant',
-        content: response
-      };
-      
-      // Add the plan message to the chat
-      setMessages(prev => [...prev, planMessage]);
-      
-      // Add assistant response to history
-      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
-    } catch (error) {
-      const errorMessage: Message = {
-        id: Date.now(),
-        role: 'assistant',
-        content: `⚠️ Error generating plan: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    }
-  };
-
   // Add a helper function for showing notifications
   const showNotification = (message: string, severity: 'success' | 'info' | 'warning' | 'error' = 'info') => {
     setNotification({
