@@ -1,14 +1,14 @@
 import { Add as AddIcon } from '@mui/icons-material';
 import {
-  Alert,
-  Box,
-  Button,
-  Card,
-  CircularProgress,
-  LinearProgress,
-  Snackbar,
-  Typography,
-  useTheme
+    Alert,
+    Box,
+    Button,
+    Card,
+    CircularProgress,
+    LinearProgress,
+    Snackbar,
+    Typography,
+    useTheme
 } from '@mui/material';
 import { marked } from 'marked'; // Import the marked library
 import * as React from 'react';
@@ -105,59 +105,66 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
   // Function to convert our work items to the format expected by the WorkItemService
   const convertToServiceFormat = (items: any[]) => {
     return items.map(item => {
+      // Initialize with required fields and proper typing
       const convertedItem: {
         type: string;
         title: string;
         description: string;
         acceptanceCriteria?: string;
-        additionalFields?: Record<string, any>;
+        additionalFields: Record<string, any>;
         children?: any[];
       } = {
         type: item.type,
         title: item.title,
         description: item.description,
-        additionalFields: item.additionalFields ? { ...item.additionalFields } : {}
+        additionalFields: {} as Record<string, any>
       };
 
-      // Look for acceptance criteria in various locations and formats
+      // Handle acceptance criteria from various possible locations
+      let acceptanceCriteriaValue = null;
+
+      // First check direct acceptanceCriteria property
       if (item.acceptanceCriteria && item.acceptanceCriteria !== 'Acceptance criteria being generated...') {
-        // If it's directly in the item as a separate field
-        convertedItem.acceptanceCriteria = item.acceptanceCriteria;
-      } else if (item.additionalFields) {
-        // First check for exact match
-        if (item.additionalFields['Acceptance Criteria']) {
-          convertedItem.acceptanceCriteria = item.additionalFields['Acceptance Criteria'];
-          
-          // Remove it from additionalFields
-          const newAdditionalFields = { ...item.additionalFields };
-          delete newAdditionalFields['Acceptance Criteria'];
-          convertedItem.additionalFields = newAdditionalFields;
-        } else {
-          // If no exact match, try normalized matching
-          const normalizeKey = (key: string) => key.toLowerCase().replace(/[\s._-]/g, '');
-          const acceptanceCriteriaKeys = Object.keys(item.additionalFields).filter(key => 
-            normalizeKey(key) === 'acceptancecriteria'
-          );
-          
-          if (acceptanceCriteriaKeys.length > 0) {
-            // Found acceptance criteria in additionalFields - use the first matching key
-            const matchingKey = acceptanceCriteriaKeys[0];
-            convertedItem.acceptanceCriteria = item.additionalFields[matchingKey];
-            
-            // Remove it from additionalFields to avoid duplication
-            const newAdditionalFields = { ...item.additionalFields };
-            delete newAdditionalFields[matchingKey];
-            convertedItem.additionalFields = newAdditionalFields;
+        acceptanceCriteriaValue = item.acceptanceCriteria;
+      }
+      
+      // Then check additionalFields with various possible keys
+      if (!acceptanceCriteriaValue && item.additionalFields) {
+        // Check for exact matches first
+        const possibleKeys = [
+          'AcceptanceCriteria',
+          'Acceptance Criteria',
+          'acceptanceCriteria',
+          'acceptance_criteria',
+          'acceptance-criteria'
+        ];
+
+        for (const key of possibleKeys) {
+          if (key in item.additionalFields) {
+            acceptanceCriteriaValue = item.additionalFields[key];
+            // Remove from additionalFields to avoid duplication
+            delete item.additionalFields[key];
+            break;
           }
         }
       }
 
-      // Handle additionalFields - set undefined if empty
-      convertedItem.additionalFields = convertedItem.additionalFields && 
-        Object.keys(convertedItem.additionalFields).length > 0 ? 
-        convertedItem.additionalFields : undefined;
+      // Set the acceptance criteria if we found any
+      if (acceptanceCriteriaValue) {
+        // Handle array of acceptance criteria
+        if (Array.isArray(acceptanceCriteriaValue)) {
+          convertedItem.acceptanceCriteria = acceptanceCriteriaValue.join("\n");
+        } else {
+          convertedItem.acceptanceCriteria = acceptanceCriteriaValue;
+        }
+      }
 
-      // Add children if they exist
+      // Copy remaining additional fields
+      if (item.additionalFields) {
+        Object.assign(convertedItem.additionalFields, item.additionalFields);
+      }
+
+      // Handle children recursively
       if (item.children && item.children.length > 0) {
         convertedItem.children = convertToServiceFormat(item.children);
       }

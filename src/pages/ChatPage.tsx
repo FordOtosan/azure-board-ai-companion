@@ -37,6 +37,7 @@ import { TestPlanForm } from '../features/testPlanAssistant';
 import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
 import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
+import { WorkItemChunkingService } from '../services/api/WorkItemChunkingService';
 import { WorkItemCreationResult, WorkItemService } from '../services/api/WorkItemService';
 import { getOrganizationAndProject } from '../services/sdk/AzureDevOpsInfoService';
 import { AzureDevOpsSdkService } from '../services/sdk/AzureDevOpsSdkService';
@@ -1468,125 +1469,11 @@ ${messageContent}
                     
                     // First check if this is a test plan
                     if (messageContent.includes('##HIGHLEVELTESTPLAN##')) {
-                      console.log('[ChatPage] Detected test plan content');
-                      
-                      // If current LLM is not available, just show the form with raw content
-                      if (!currentLlm) {
-                        setTestPlanContent(messageContent);
-                        setIsTestPlanFormOpen(true);
-                        return;
-                      }
-                      
-                      // Otherwise, generate the JSON test plan structure for better parsing
-                      setIsLoadingResponse(true);
-                      setCanStopGeneration(true);
-                      
-                      // Create new AbortController for this request
-                      abortControllerRef.current = new AbortController();
-                      
-                      console.log('[ChatPage] Generating JSON test plan from high level test plan');
-                      
-                      // Create a prompt for structured JSON test plan generation
-                      const jsonTestPlanPrompt = `
-You are a test plan structuring assistant. Convert the following high-level test plan into a JSON structure.
-
-INPUT TEST PLAN:
-${messageContent}
-
-OUTPUT FORMAT:
-Your response must be ONLY a valid JSON object with this structure:
-{
-  "testPlan": {
-    "name": "string", // The name of the test plan
-    "testSuites": [
-      {
-        "name": "string", // The name of a test suite
-        "testCases": [
-          {
-            "name": "string", // The name of a test case
-            "description": "string", // A detailed description of what this test case verifies
-            "steps": [
-              {
-                "action": "string", // Specific action the tester should take
-                "expectedResult": "string" // The expected outcome of the action
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-}
-
-CRITICAL REQUIREMENTS:
-1. EVERY "testSuites" array MUST contain at least one test suite
-2. EVERY test suite MUST have a "testCases" array, even if empty
-3. EVERY test case MUST include at least 3-5 detailed steps with clear actions and expected results
-4. DO NOT omit the "testCases" property from any suite, even if empty use: "testCases": []
-5. DO NOT omit the "steps" property from any test case, even if empty use: "steps": []
-6. STRICT JSON structure must be followed - no additional or missing properties
-7. Each field must be enclosed in double quotes and conform to JSON syntax
-8. Steps should be specific and actionable (e.g., "Click the Submit button" rather than "Submit the form")
-9. Expected results should clearly state what the tester should observe (e.g., "User is redirected to the dashboard page")
-10. Test case descriptions should explain what functionality is being tested and why
-11. Use realistic test data examples when appropriate
-
-Your response must be VALID JSON and NOTHING ELSE - no explanations, no text outside the JSON object.
-
-If any part of the test plan is unclear, make a reasonable interpretation rather than omitting the JSON structure.`;
-                      
-                      // Process silently in the background, don't add to chat
-                      showNotification('Preparing test plan...', 'info');
-                      
-                      try {
-                        // Add user message to LLM history (but don't display in chat)
-                        const newUserMessage: ChatMessage = { 
-                          role: 'user', 
-                          content: jsonTestPlanPrompt
-                        };
-                        const updatedHistory = [...llmHistory, newUserMessage];
-                        
-                        // Update the history state
-                        setLlmHistory(updatedHistory);
-                        
-                        // Send the prompt to the LLM API
-                        LlmApiService.sendPromptToLlm(currentLlm, jsonTestPlanPrompt, updatedHistory)
-                          .then((fullResponse) => {
-                            setCanStopGeneration(false);
-                            setIsLoadingResponse(false);
-                            
-                            // Add assistant response to history
-                            setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
-                            
-                            // Set the JSON response as the test plan content
-                            setTestPlanContent(fullResponse);
-                            
-                            // Open the test plan form modal
-                            setIsTestPlanFormOpen(true);
-                          })
-                          .catch((error) => {
-                            console.error('Error generating JSON test plan:', error);
-                            setCanStopGeneration(false);
-                            setIsLoadingResponse(false);
-                            
-                            // Fallback to using the original test plan format
-                            setTestPlanContent(messageContent);
-                            setIsTestPlanFormOpen(true);
-                          });
-                      } catch (error) {
-                        console.error('Error generating JSON test plan:', error);
-                        setCanStopGeneration(false);
-                        setIsLoadingResponse(false);
-                        
-                        // Fallback to using the original test plan format
-                        setTestPlanContent(messageContent);
-                        setIsTestPlanFormOpen(true);
-                      }
-                      
+                      handleContinueWithTestPlan(msg);
                       return;
                     }
                     
-                    // If not a test plan, check if it's a work item JSON plan
+                    // Check if it's a work item JSON plan
                     const isJsonPlan = (() => {
                       try {
                         // Check if it has a code block with JSON
@@ -1608,19 +1495,6 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                       }
                     })();
                     
-                    // Before opening form, make sure no navigation buttons exist
-                    // Remove any existing navigation buttons related to work items or test plans
-                    setMessages(prev => 
-                      prev.filter(msg => 
-                        !(msg.navigationButtons && 
-                          msg.navigationButtons.some(btn => 
-                            btn.action === 'showWorkItems' || 
-                            btn.action === 'continueWithTestPlan'
-                          )
-                        )
-                      )
-                    );
-                    
                     if (isJsonPlan) {
                       // If it's already a JSON plan, directly open the form with that content
                       setJsonPlan(messageContent);
@@ -1637,11 +1511,11 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                     const planContent = messageContent;
                     console.log('[ChatPage] High-level plan content:');
                     console.log(planContent);
-                    
+
                     // Gather field information for the prompt
                     const fieldInformation = teamMapping?.workItemTypes
-                      .filter(t => t.enabled)
-                      .map(t => {
+                      ?.filter(t => t.enabled)
+                      ?.map(t => {
                         const requiredFields = t.fields
                           .filter(f => f.enabled && f.required)
                           .map(f => f.displayName || f.name);
@@ -1663,7 +1537,7 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                               examples: getFieldExamples(f.name, t.name)
                             }))
                         };
-                      });
+                      }) || [];
                       
                     console.log('[ChatPage] Field information for JSON prompt:');
                     console.log(JSON.stringify(fieldInformation, null, 2));
@@ -1699,6 +1573,51 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                       return ["Sample value for " + fieldName];
                     }
 
+                    // Check if this is a large plan that needs chunking
+                    const cleanContent = planContent.replace('##HIGHLEVELPLAN##', '').trim();
+                    const isLargePlan = cleanContent.split('\n').length > 10;
+                    
+                    if (isLargePlan && currentLlm) {
+                      console.log('[ChatPage] Large plan detected, using chunking strategy');
+                      
+                      try {
+                        // Split the plan into chunks
+                        const chunks = WorkItemChunkingService.chunkHighLevelPlan(planContent);
+                        
+                        // Process the chunks with progress updates
+                        WorkItemChunkingService.processChunks(
+                          chunks,
+                          currentLlm,
+                          teamWorkItemMapping || teamMapping,
+                          currentLanguage,
+                          (progress) => {
+                            // Update progress notification
+                            showNotification(`Converting plan to JSON (${Math.round(progress)}%)`, 'info');
+                          }
+                        )
+                        .then((jsonPlan) => {
+                          setJsonPlan(jsonPlan);
+                          setIsWorkItemFormOpen(true);
+                          setIsLoadingResponse(false);
+                          setCanStopGeneration(false);
+                          showNotification('Plan converted successfully', 'success');
+                        })
+                        .catch((error) => {
+                          console.error('[ChatPage] Error processing chunked plan:', error);
+                          setIsLoadingResponse(false);
+                          setCanStopGeneration(false);
+                          showNotification('Error converting plan to JSON', 'error');
+                        });
+                      } catch (error) {
+                        console.error('[ChatPage] Error chunking plan:', error);
+                        setIsLoadingResponse(false);
+                        setCanStopGeneration(false);
+                        showNotification('Error processing large plan', 'error');
+                      }
+                      return;
+                    }
+                    
+                    // For smaller plans or when no LLM is available, use the original approach
                     // Create the prompt for detailed JSON plan
                     const jsonPrompt = `
 # Convert High-Level Plan to Azure DevOps Work Items
