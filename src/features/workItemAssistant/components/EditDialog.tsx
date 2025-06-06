@@ -1,19 +1,19 @@
 import { Add as AddIcon, Delete as DeleteIcon } from '@mui/icons-material';
 import {
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  IconButton,
-  InputLabel,
-  MenuItem,
-  Select,
-  TextField,
-  Typography,
-  useTheme
+    Box,
+    Button,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    FormControl,
+    IconButton,
+    InputLabel,
+    MenuItem,
+    Select,
+    TextField,
+    Typography,
+    useTheme
 } from '@mui/material';
 import MDEditor from '@uiw/react-md-editor';
 import * as React from 'react';
@@ -90,11 +90,24 @@ export const EditDialog: React.FC<EditDialogProps> = ({
   
   if (!editedItem) return null;
   
-  const handleFieldChange = (field: keyof WorkItem, value: string) => {
-    setEditedItem({
-      ...editedItem,
-      [field]: value
-    });
+  // Handle field changes
+  const handleFieldChange = (field: string, value: any) => {
+    if (!editedItem) return;
+
+    if (field === 'additionalFields') {
+      setEditedItem({
+        ...editedItem,
+        additionalFields: {
+          ...editedItem.additionalFields,
+          ...value
+        }
+      });
+    } else {
+      setEditedItem({
+        ...editedItem,
+        [field]: value
+      });
+    }
   };
   
   const handleAddAdditionalField = () => {
@@ -196,65 +209,106 @@ export const EditDialog: React.FC<EditDialogProps> = ({
             </div>
           </Box>
           
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="subtitle1" gutterBottom>
-              {T.acceptanceCriteria}
-            </Typography>
-            <div data-color-mode={themeMode}>
-              <MDEditor
-                value={editedItem.acceptanceCriteria || ''}
-                onChange={(value) => handleFieldChange('acceptanceCriteria', value || '')}
-                height={200}
-                preview="edit"
-              />
-            </div>
-          </Box>
-          
-          <Typography variant="subtitle1" gutterBottom>
-            {T.additionalFields}
-          </Typography>
-          
-          {additionalFields.map((field, index) => (
-            <Box key={index} sx={{ display: 'flex', mb: 1 }}>
-              <TextField
-                label={T.key}
-                value={field.key}
-                onChange={(e) => handleAdditionalFieldChange(index, 'key', e.target.value)}
-                sx={{ mr: 1, flex: 1 }}
-              />
-              <TextField
-                label={T.value}
-                value={field.value}
-                onChange={(e) => handleAdditionalFieldChange(index, 'value', e.target.value)}
-                sx={{ mr: 1, flex: 2 }}
-              />
-              <IconButton 
-                onClick={() => handleRemoveAdditionalField(index)}
-                sx={{ alignSelf: 'center' }}
-              >
-                <DeleteIcon />
-              </IconButton>
+          {/* Only show acceptance criteria for non-task items */}
+          {!['Task'].includes(editedItem.type) && (
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="subtitle1" gutterBottom>
+                {T.acceptanceCriteria}
+              </Typography>
+              <div data-color-mode={themeMode}>
+                <MDEditor
+                  value={editedItem.acceptanceCriteria || ''}
+                  onChange={(value) => handleFieldChange('acceptanceCriteria', value || '')}
+                  height={200}
+                  preview="edit"
+                />
+              </div>
             </Box>
-          ))}
+          )}
+
+          {/* Story Points field for Epics, Features, and PBIs */}
+          {['Epic', 'Feature', 'Product Backlog Item', 'User Story'].includes(editedItem.type) && (
+            <TextField
+              fullWidth
+              label={T.storyPoints}
+              type="number"
+              value={editedItem.additionalFields?.['Microsoft.VSTS.Scheduling.StoryPoints'] || ''}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                const updatedFields = {
+                  ...editedItem.additionalFields,
+                  'Microsoft.VSTS.Scheduling.StoryPoints': newValue,
+                  'StoryPoints': newValue // Keep both for UI display
+                };
+                handleFieldChange('additionalFields', updatedFields);
+              }}
+              sx={{ mb: 2 }}
+            />
+          )}
+
+          {/* Remaining Work field for Tasks */}
+          {editedItem.type === 'Task' && (
+            <TextField
+              fullWidth
+              label="Remaining Work (hours)"
+              type="number"
+              value={editedItem.additionalFields?.['Microsoft.VSTS.Scheduling.RemainingWork'] || ''}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                const updatedFields = {
+                  ...editedItem.additionalFields,
+                  'Microsoft.VSTS.Scheduling.RemainingWork': newValue
+                };
+                handleFieldChange('additionalFields', updatedFields);
+              }}
+              sx={{ mb: 2 }}
+            />
+          )}
           
-          <Button 
-            startIcon={<AddIcon />}
-            onClick={handleAddAdditionalField}
-            sx={{ mt: 1 }}
-          >
-            {T.additionalFields}
-          </Button>
+          {/* Additional Fields Section */}
+          <Box sx={{ mt: 3 }}>
+            <Typography variant="subtitle1" gutterBottom>
+              {T.additionalFields}
+            </Typography>
+            {additionalFields.map((field, index) => (
+              <Box key={index} sx={{ display: 'flex', mb: 1, alignItems: 'center' }}>
+                <TextField
+                  label={T.key}
+                  size="small"
+                  value={field.key}
+                  sx={{ width: '25%', mr: 1 }}
+                  onChange={(e) => handleAdditionalFieldChange(index, 'key', e.target.value)}
+                />
+                <TextField
+                  size="small"
+                  value={field.value}
+                  onChange={(e) => handleAdditionalFieldChange(index, 'value', e.target.value)}
+                  sx={{ flex: 1 }}
+                />
+                <IconButton 
+                  size="small"
+                  onClick={() => handleRemoveAdditionalField(index)}
+                  sx={{ ml: 1 }}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Box>
+            ))}
+            <Button
+              startIcon={<AddIcon />}
+              size="small"
+              variant="outlined"
+              onClick={handleAddAdditionalField}
+              sx={{ mt: 1 }}
+            >
+              {T.additionalFields}
+            </Button>
+          </Box>
         </Box>
       </DialogContent>
       <DialogActions>
-        <Button onClick={handleClose}>
-          {T.cancel}
-        </Button>
-        <Button 
-          onClick={handleSave}
-          variant="contained"
-          disabled={!editedItem.title.trim() || !editedItem.description.trim()}
-        >
+        <Button onClick={handleClose}>{T.cancel}</Button>
+        <Button onClick={handleSave} variant="contained" color="primary">
           {T.saveChanges}
         </Button>
       </DialogActions>

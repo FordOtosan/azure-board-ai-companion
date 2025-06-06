@@ -167,61 +167,78 @@ Rules:
    - description (generate a detailed description based on the title and type)
    - additionalFields object containing:
      * For Epics:
-       - No additional fields needed
+       - Microsoft.VSTS.Scheduling.StoryPoints (estimate between 8-40, using Fibonacci: 8,13,21,34,40)
      * For Features:
-       - StoryPoints (estimate between 8-40, using Fibonacci: 8,13,21,34,40)
-     * For Product Backlog Items (ALL FIELDS REQUIRED):
-       - StoryPoints (estimate between 1-13, using Fibonacci: 1,2,3,5,8,13)
-       - AcceptanceCriteria (REQUIRED: minimum 4 specific, testable criteria that define when the PBI is complete)
+       - Microsoft.VSTS.Scheduling.StoryPoints (estimate between 8-40, using Fibonacci: 8,13,21,34,40)
+     * For Product Backlog Items:
+       - Microsoft.VSTS.Scheduling.StoryPoints (estimate between 1-13, using Fibonacci: 1,2,3,5,8,13)
      * For Tasks:
-       - RemainingWork (estimated hours, between 1-40)
+       - Microsoft.VSTS.Scheduling.RemainingWork (estimated hours, between 1-40)
 4. Generate meaningful descriptions and acceptance criteria that align with the work item's purpose
 5. Preserve the exact parent-child relationships shown by indentation
 6. Make sure estimates are realistic:
    - Story Points should follow Fibonacci sequence
    - Task hours should be in whole numbers
-7. IMPORTANT: Every Product Backlog Item MUST have detailed acceptance criteria that are:
+7. IMPORTANT: Every Epic, Feature, and Product Backlog Item MUST have detailed acceptance criteria that are:
    - Specific and testable
-   - Related to the PBI's functionality
+   - Related to the functionality
    - Written from a user or system perspective
    - Include validation and error scenarios
-8. IMPORTANT: The AcceptanceCriteria field must be a string array, not a string
+8. IMPORTANT: Format acceptance criteria as bullet points starting with "* " (asterisk and space)
 9. IMPORTANT: Do not include any Activity field in the additionalFields
 
-Example for a Vehicle Registration PBI:
+Example for an Epic:
+{
+  "type": "Epic",
+  "title": "Vehicle Management System",
+  "description": "Implement a comprehensive vehicle management system to handle fleet operations, maintenance, and tracking",
+  "additionalFields": {
+    "Microsoft.VSTS.Scheduling.StoryPoints": 34
+  },
+  "acceptanceCriteria": [
+    "* System successfully manages a fleet of at least 1000 vehicles with response times under 2 seconds",
+    "* All critical modules (tracking, maintenance, inventory) are integrated and working together",
+    "* System meets security requirements for data protection and access control",
+    "* Reporting and analytics features provide actionable insights for fleet management",
+    "* System scales horizontally to handle increased load without performance degradation",
+    "* Disaster recovery and backup systems are in place and tested"
+  ]
+}
+
+Example for a Feature:
+{
+  "type": "Feature",
+  "title": "Vehicle Registration Module",
+  "description": "Implement comprehensive vehicle registration functionality",
+  "additionalFields": {
+    "Microsoft.VSTS.Scheduling.StoryPoints": 21
+  },
+  "acceptanceCriteria": [
+    "* System supports registration of all vehicle types (cars, trucks, motorcycles)",
+    "* Registration workflow includes document upload and verification steps",
+    "* Admin can configure registration requirements by vehicle type",
+    "* System generates unique registration IDs following the specified format",
+    "* Integration with external vehicle databases works as specified",
+    "* Performance meets the required response time under full load"
+  ]
+}
+
+Example for a Product Backlog Item:
 {
   "type": "Product Backlog Item",
   "title": "Vehicle Registration Form",
   "description": "Implement the vehicle registration form to capture all necessary vehicle information",
   "additionalFields": {
-    "StoryPoints": 8,
-    "AcceptanceCriteria": [
-      "User can input vehicle details including make, model, year, color, and registration number",
-      "System validates all required fields and shows appropriate error messages",
-      "User can upload and attach vehicle documents (registration, insurance)",
-      "System saves all information and generates a unique vehicle ID",
-      "User receives a confirmation email with registration details",
-      "Admin can view and approve/reject the registration with comments"
-    ]
-  }
-}
-
-Example for a Vehicle Search PBI:
-{
-  "type": "Product Backlog Item",
-  "title": "Vehicle Search Functionality",
-  "description": "Implement search functionality for registered vehicles",
-  "additionalFields": {
-    "StoryPoints": 5,
-    "AcceptanceCriteria": [
-      "User can search vehicles by registration number, make, model, or owner name",
-      "System displays search results in a paginated table with relevant details",
-      "Search results can be sorted by different columns (date, status, etc.)",
-      "System shows appropriate message when no results are found",
-      "Search results load within 2 seconds for up to 1000 records",
-      "User can export search results to CSV format"
-    ]
-  }
+    "Microsoft.VSTS.Scheduling.StoryPoints": 8
+  },
+  "acceptanceCriteria": [
+    "* User can input vehicle details including make, model, year, color, and registration number",
+    "* System validates all required fields and shows appropriate error messages",
+    "* User can upload and attach vehicle documents (registration, insurance)",
+    "* System saves all information and generates a unique vehicle ID",
+    "* User receives a confirmation email with registration details",
+    "* Admin can view and approve/reject the registration with comments"
+  ]
 }`;
 
       try {
@@ -274,52 +291,57 @@ Example for a Vehicle Search PBI:
    * Validates and fixes acceptance criteria format in a work item
    */
   private static validateAndFixAcceptanceCriteria(workItem: any) {
-    if (!workItem) return;
-
-    // Check if this is a PBI or User Story
-    if (workItem.type === 'Product Backlog Item' || workItem.type === 'User Story') {
-      // First check additionalFields for acceptance criteria
-      if (workItem.additionalFields) {
-        // Look for acceptance criteria with various possible keys
-        const possibleKeys = [
-          'AcceptanceCriteria',
-          'Acceptance Criteria',
-          'acceptanceCriteria',
-          'acceptance_criteria',
-          'acceptance-criteria'
+    // Check if this is a work item type that should have acceptance criteria
+    const typesWithAcceptanceCriteria = ['Epic', 'Feature', 'Product Backlog Item', 'User Story'];
+    
+    if (typesWithAcceptanceCriteria.includes(workItem.type)) {
+      // If acceptance criteria is missing or empty, generate a placeholder
+      if (!workItem.acceptanceCriteria || workItem.acceptanceCriteria.length === 0) {
+        workItem.acceptanceCriteria = [
+          "* Requirement is fully implemented and tested",
+          "* All acceptance tests pass successfully",
+          "* Documentation is complete and up-to-date",
+          "* Code review is completed and approved",
+          "* Performance meets specified requirements",
+          "* Security requirements are met"
         ];
-
-        for (const key of possibleKeys) {
-          if (key in workItem.additionalFields) {
-            // Move acceptance criteria to main property
-            let criteriaValue = workItem.additionalFields[key];
-            
-            // Ensure it's an array
-            if (Array.isArray(criteriaValue)) {
-              workItem.acceptanceCriteria = criteriaValue.join('\n');
-            } else if (typeof criteriaValue === 'string') {
-              workItem.acceptanceCriteria = criteriaValue;
-            }
-            
-            // Remove from additionalFields
-            delete workItem.additionalFields[key];
-            break;
-          }
-        }
       }
-
-      // If no acceptance criteria found, set a default
-      if (!workItem.acceptanceCriteria) {
-        workItem.acceptanceCriteria = 'Acceptance criteria being generated...';
+      
+      // If acceptance criteria is a string, convert it to an array
+      if (typeof workItem.acceptanceCriteria === 'string') {
+        // Split by newlines and ensure each item starts with a bullet point
+        workItem.acceptanceCriteria = workItem.acceptanceCriteria
+          .split('\n')
+          .map((item: string) => item.trim())
+          .filter((item: string) => item.length > 0)
+          .map((item: string) => item.startsWith('* ') ? item : `* ${item}`);
+      }
+      
+      // Ensure each item in the array starts with a bullet point
+      if (Array.isArray(workItem.acceptanceCriteria)) {
+        workItem.acceptanceCriteria = workItem.acceptanceCriteria
+          .map((item: any) => typeof item === 'string' && item.trim())
+          .filter((item: string) => item && item.length > 0)
+          .map((item: string) => item.startsWith('* ') ? item : `* ${item}`);
+      }
+      
+      // Move acceptance criteria to additionalFields with the correct field name
+      if (!workItem.additionalFields) {
+        workItem.additionalFields = {};
+      }
+      workItem.additionalFields['Microsoft.VSTS.Common.AcceptanceCriteria'] = 
+        Array.isArray(workItem.acceptanceCriteria) 
+          ? workItem.acceptanceCriteria.join('\n')
+          : workItem.acceptanceCriteria;
+    } else {
+      // For other work item types, remove any acceptance criteria
+      delete workItem.acceptanceCriteria;
+      if (workItem.additionalFields) {
+        delete workItem.additionalFields['Microsoft.VSTS.Common.AcceptanceCriteria'];
       }
     }
 
-    // Remove Activity field if present
-    if (workItem.additionalFields?.Activity) {
-      delete workItem.additionalFields.Activity;
-    }
-
-    // Process children recursively
+    // Process child items recursively
     if (workItem.children && Array.isArray(workItem.children)) {
       workItem.children.forEach((child: any) => this.validateAndFixAcceptanceCriteria(child));
     }

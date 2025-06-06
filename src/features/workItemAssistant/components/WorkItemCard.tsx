@@ -1,26 +1,26 @@
 import {
-  CheckCircleOutline as AcceptanceIcon,
-  Add as AddIcon,
-  Delete as DeleteIcon,
-  Edit as EditIcon,
-  ExpandMore,
-  FormatListBulleted as ListIcon,
-  AutoFixHigh as RefineIcon,
-  Subject as SubjectIcon
+    CheckCircleOutline as AcceptanceIcon,
+    Add as AddIcon,
+    Delete as DeleteIcon,
+    Edit as EditIcon,
+    ExpandMore,
+    FormatListBulleted as ListIcon,
+    AutoFixHigh as RefineIcon,
+    Subject as SubjectIcon
 } from '@mui/icons-material';
 import {
-  Accordion,
-  AccordionDetails,
-  AccordionSummary,
-  Box,
-  Button,
-  CircularProgress,
-  IconButton,
-  Paper,
-  TextField,
-  Tooltip,
-  Typography,
-  useTheme
+    Accordion,
+    AccordionDetails,
+    AccordionSummary,
+    Box,
+    Button,
+    CircularProgress,
+    IconButton,
+    Paper,
+    TextField,
+    Tooltip,
+    Typography,
+    useTheme
 } from '@mui/material';
 import MDEditor from '@uiw/react-md-editor';
 import * as React from 'react';

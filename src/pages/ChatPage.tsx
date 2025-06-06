@@ -1,24 +1,24 @@
 import {
-    Assessment,
-    Error as ErrorIcon,
-    NoteAdd
+  Assessment,
+  Error as ErrorIcon,
+  NoteAdd
 } from '@mui/icons-material';
 import {
-    Alert,
-    Box,
-    Button,
-    CircularProgress,
-    Container,
-    Dialog,
-    DialogActions,
-    DialogContent,
-    DialogTitle,
-    Fade,
-    Paper,
-    Slide,
-    Snackbar,
-    Typography,
-    useTheme
+  Alert,
+  Box,
+  Button,
+  CircularProgress,
+  Container,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Fade,
+  Paper,
+  Slide,
+  Snackbar,
+  Typography,
+  useTheme
 } from '@mui/material';
 import { alpha } from '@mui/material/styles';
 import { WebApiTeam } from 'azure-devops-extension-api/Core'; // Restore team type import
@@ -1338,85 +1338,7 @@ ${messageContent}
             </Fade>
           )}
           
-          {/* Global loading overlay for work item creation */}
-          {isCreatingWorkItems && (
-            <Fade in={true}>
-              <Box
-                sx={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: alpha(theme.palette.background.paper, 0.7),
-                  backdropFilter: 'blur(5px)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 1400,
-                }}
-              >
-                <Paper
-                  elevation={3}
-                  sx={{
-                    backgroundColor: theme.palette.background.paper,
-                    borderRadius: 2,
-                    p: 4,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 2,
-                    boxShadow: theme.shadows[10],
-                    maxWidth: '90%',
-                    width: 400,
-                    textAlign: 'center',
-                    animation: 'pulse 2s infinite ease-in-out',
-                    '@keyframes pulse': {
-                      '0%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.4)}` },
-                      '70%': { boxShadow: `0 0 0 15px ${alpha(theme.palette.primary.main, 0)}` },
-                      '100%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0)}` }
-                    }
-                  }}
-                >
-                  <Box
-                    sx={{
-                      position: 'relative',
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      m: 1
-                    }}
-                  >
-                    <CircularProgress 
-                      size={70} 
-                      thickness={3} 
-                      sx={{ 
-                        color: theme.palette.primary.main
-                      }} 
-                    />
-                    <NoteAdd
-                      sx={{
-                        position: 'absolute',
-                        fontSize: 30,
-                        color: theme.palette.primary.main
-                      }}
-                    />
-                  </Box>
-                  <Typography variant="h6" sx={{ fontWeight: 500, mt: 2 }}>
-                    {currentLanguage === 'en' 
-                      ? 'Creating work items...'
-                      : 'İş öğeleri oluşturuluyor...'}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {currentLanguage === 'en'
-                      ? 'Saving work items to Azure DevOps and establishing relationships'
-                      : 'İş öğeleri Azure DevOps\'a kaydediliyor ve ilişkiler kuruluyor'}
-                  </Typography>
-                </Paper>
-              </Box>
-            </Fade>
-          )}
+
 
           {/* General Error Display */}
           {error && (
@@ -1596,6 +1518,26 @@ ${messageContent}
                           }
                         )
                         .then((jsonPlan) => {
+                          // Create a new message for the JSON plan
+                          const jsonPlanMessage: Message = {
+                            id: Date.now(),
+                            role: 'assistant',
+                            content: jsonPlan,
+                            navigationButtons: workItemsCreated ? [
+                              {
+                                label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
+                                action: 'showWorkItems'
+                              },
+                              {
+                                label: currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et',
+                                action: 'continueWithTestPlan'
+                              }
+                            ] : undefined
+                          };
+
+                          // Add the JSON plan message to chat
+                          setMessages(prev => [...prev, jsonPlanMessage]);
+
                           setJsonPlan(jsonPlan);
                           setIsWorkItemFormOpen(true);
                           setIsLoadingResponse(false);
@@ -2325,7 +2267,10 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                       // Remove any existing navigation button messages
                       const filteredMessages = messages.filter(msg => 
                         !(msg.navigationButtons && 
-                          msg.navigationButtons.some(btn => btn.action === 'showWorkItems'))
+                          msg.navigationButtons.some(btn => 
+                            btn.action === 'showWorkItems' || 
+                            btn.action === 'continueWithTestPlan'
+                          ))
                       );
                       
                       // Remove JSON plan messages - they'll be recreated with workItemsCreated=true
@@ -2350,6 +2295,16 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                           const recreatedJsonPlans = jsonPlanMessages.map(msg => ({
                             ...msg,
                             id: Date.now() + Math.random(), // Force a new ID
+                            navigationButtons: [
+                              {
+                                label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
+                                action: 'showWorkItems'
+                              },
+                              {
+                                label: currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et',
+                                action: 'continueWithTestPlan'
+                              }
+                            ]
                           }));
                           
                           setMessages(prev => [...prev, ...recreatedJsonPlans]);
@@ -2365,6 +2320,10 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                               label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
                               action: 'showWorkItems',
                               icon: 'list' // Use a list icon for better visibility
+                            },
+                            {
+                              label: currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et',
+                              action: 'continueWithTestPlan'
                             }
                           ]
                         };

@@ -13,6 +13,7 @@ export interface WorkItemFormProps {
   availableTypes: string[];
   teamMapping?: TeamWorkItemConfig | null;
   selectedTeam?: WebApiTeam | null;
+  onContinueWithTestPlan?: () => void;
 }
 
 export const WorkItemForm: React.FC<WorkItemFormProps> = (props) => {

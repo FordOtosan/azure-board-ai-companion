@@ -1,4 +1,4 @@
-import { Add as AddIcon } from '@mui/icons-material';
+import { Add as AddIcon, Launch, PlaylistAddCheck } from '@mui/icons-material';
 import {
     Alert,
     Box,
@@ -19,6 +19,7 @@ import { WorkItemProvider, useWorkItemContext } from '../context/WorkItemContext
 import { useWorkItemRefinement } from '../hooks/useWorkItemRefinement';
 import { getTranslations } from '../i18n/translations';
 import { WorkItemFormProps } from '../types/WorkItemTypes';
+import { CreationDialog } from './CreationDialog';
 import { EditDialog } from './EditDialog';
 import { RefinementModal } from './RefinementModal';
 import { WorkItemCard } from './WorkItemCard';
@@ -30,7 +31,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
   currentLanguage,
   availableTypes,
   teamMapping,
-  selectedTeam
+  selectedTeam,
+  onContinueWithTestPlan
 }) => {
   const theme = useTheme();
   const T = getTranslations(currentLanguage);
@@ -63,6 +65,8 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
   const [showCreationDialog, setShowCreationDialog] = React.useState(false);
   const [currentItemBeingCreated, setCurrentItemBeingCreated] = React.useState<string>('');
   const [exactCompletedItems, setExactCompletedItems] = React.useState<number>(0);
+  const [creationComplete, setCreationComplete] = React.useState(false);
+  const [totalItems, setTotalItems] = React.useState(0);
   
   // Handle the "Refine Again" button click in the modal
   React.useEffect(() => {
@@ -120,47 +124,65 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         additionalFields: {} as Record<string, any>
       };
 
-      // Handle acceptance criteria from various possible locations
-      let acceptanceCriteriaValue = null;
-
-      // First check direct acceptanceCriteria property
-      if (item.acceptanceCriteria && item.acceptanceCriteria !== 'Acceptance criteria being generated...') {
-        acceptanceCriteriaValue = item.acceptanceCriteria;
-      }
+      // Handle acceptance criteria for appropriate work item types
+      const shouldHaveAcceptanceCriteria = ['Epic', 'Feature', 'Product Backlog Item', 'User Story'].includes(item.type);
       
-      // Then check additionalFields with various possible keys
-      if (!acceptanceCriteriaValue && item.additionalFields) {
-        // Check for exact matches first
-        const possibleKeys = [
-          'AcceptanceCriteria',
-          'Acceptance Criteria',
-          'acceptanceCriteria',
-          'acceptance_criteria',
-          'acceptance-criteria'
-        ];
+      if (shouldHaveAcceptanceCriteria) {
+        // Handle acceptance criteria from various possible locations
+        let acceptanceCriteriaValue = null;
 
-        for (const key of possibleKeys) {
-          if (key in item.additionalFields) {
-            acceptanceCriteriaValue = item.additionalFields[key];
-            // Remove from additionalFields to avoid duplication
-            delete item.additionalFields[key];
-            break;
+        // First check direct acceptanceCriteria property
+        if (item.acceptanceCriteria && item.acceptanceCriteria !== 'Acceptance criteria being generated...') {
+          acceptanceCriteriaValue = item.acceptanceCriteria;
+        }
+        
+        // Then check additionalFields with various possible keys
+        if (!acceptanceCriteriaValue && item.additionalFields) {
+          // Check for exact matches first
+          const possibleKeys = [
+            'AcceptanceCriteria',
+            'Acceptance Criteria',
+            'acceptanceCriteria',
+            'acceptance_criteria',
+            'acceptance-criteria'
+          ];
+
+          for (const key of possibleKeys) {
+            if (key in item.additionalFields) {
+              acceptanceCriteriaValue = item.additionalFields[key];
+              // Remove from additionalFields to avoid duplication
+              delete item.additionalFields[key];
+              break;
+            }
+          }
+        }
+
+        // Set the acceptance criteria if we found any
+        if (acceptanceCriteriaValue) {
+          // Handle array of acceptance criteria
+          if (Array.isArray(acceptanceCriteriaValue)) {
+            convertedItem.acceptanceCriteria = acceptanceCriteriaValue.join("\n");
+          } else {
+            convertedItem.acceptanceCriteria = acceptanceCriteriaValue;
           }
         }
       }
 
-      // Set the acceptance criteria if we found any
-      if (acceptanceCriteriaValue) {
-        // Handle array of acceptance criteria
-        if (Array.isArray(acceptanceCriteriaValue)) {
-          convertedItem.acceptanceCriteria = acceptanceCriteriaValue.join("\n");
-        } else {
-          convertedItem.acceptanceCriteria = acceptanceCriteriaValue;
-        }
-      }
-
-      // Copy remaining additional fields
+      // Handle field name mappings
       if (item.additionalFields) {
+        // Map StoryPoints to the correct field name
+        if ('StoryPoints' in item.additionalFields) {
+          item.additionalFields['Microsoft.VSTS.Scheduling.StoryPoints'] = item.additionalFields.StoryPoints;
+          delete item.additionalFields.StoryPoints;
+        }
+
+        // Map RemainingWork to the correct field name
+        if ('RemainingWork' in item.additionalFields) {
+          item.additionalFields['Microsoft.VSTS.Scheduling.RemainingWork'] = item.additionalFields.RemainingWork;
+          delete item.additionalFields.RemainingWork;
+        }
+
+        // Copy remaining additional fields
         Object.assign(convertedItem.additionalFields, item.additionalFields);
       }
 
@@ -346,13 +368,15 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
 
   // Handle submitting work items to Azure DevOps
   const handleCreateWorkItems = async () => {
-    if (workItems.length === 0) return;
+    if (!workItems) return;
 
     setIsCreating(true);
     setCreationProgress(0);
     setCreationError(null);
     setCurrentItemBeingCreated('');
     setExactCompletedItems(0);
+    setCreationComplete(false);
+    setShowCreationDialog(true);
     
     try {
       // Get organization and project info
@@ -362,17 +386,15 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         throw new Error('Failed to get organization or project information');
       }
       
-      // Convert work items to the format needed for creation
-      const convertedWorkItems = convertToServiceFormat(workItems);
-      
-      // Estimate total operations (1 per work item including children)
+      // Calculate total items to create (including nested items)
       const countItems = (items: any[]): number => {
         return items.reduce((count, item) => {
           return count + 1 + (item.children ? countItems(item.children) : 0);
         }, 0);
       };
       
-      const totalItems = countItems(convertedWorkItems);
+      const totalItemsCount = countItems(workItems);
+      setTotalItems(totalItemsCount);
       let completedItems = 0;
       const createdResults: WorkItemCreationResult[] = [];
       
@@ -386,47 +408,15 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
           // Update the current item being created
           setCurrentItemBeingCreated(`${item.type}: ${item.title}`);
           
-          // Add detailed logging for debugging the team data
-          console.log(`Selected team debugging info:`);
-          console.log(`- selectedTeam object:`, selectedTeam);
-          console.log(`- selectedTeam type:`, selectedTeam ? typeof selectedTeam : 'null');
-          console.log(`- selectedTeam name:`, selectedTeam?.name);
-          console.log(`- selectedTeam properties:`, selectedTeam ? Object.keys(selectedTeam).join(', ') : 'null');
-          
           // Create main fields object with safe defaults
           const fields: Record<string, any> = {
             'System.Title': item.title,
-            'System.Description': item.description ? marked(item.description) : 'No description provided',
+            'System.Description': item.description ? marked(item.description.toString()) : 'No description provided',
             'Microsoft.VSTS.Common.Priority': 2, // Default priority
-            // Include selected team name in Area Path when available - with additional checks
-            'System.AreaPath': (() => {
-              // Check if we have a valid selectedTeam object
-              if (!selectedTeam) {
-                console.log('No selectedTeam object available');
-                return projectName;
-              }
-              
-              // Check what properties are available on the selectedTeam object
-              console.log('Available properties on selectedTeam:', Object.keys(selectedTeam));
-              
-              // Try to find team name in various common properties
-              const teamName = selectedTeam.name || 
-                              (typeof selectedTeam === 'object' && 'id' in selectedTeam ? 
-                                `Team ${selectedTeam.id}` : null);
-              
-              if (teamName) {
-                console.log(`Found team name: ${teamName}`);
-                return `${projectName}\\${teamName}`;
-              } else {
-                console.log('Could not find team name in selectedTeam object');
-                return projectName;
-              }
-            })()
+            'System.AreaPath': selectedTeam ? `${projectName}\\${selectedTeam.name}` : projectName
           };
           
-          console.log(`Setting Area Path for work item: ${fields['System.AreaPath']}`);
-          
-          // Add acceptance criteria if present, or use default
+          // Add acceptance criteria if present
           if (item.acceptanceCriteria) {
             // Handle array of acceptance criteria
             const criteriaValue = Array.isArray(item.acceptanceCriteria) 
@@ -434,7 +424,7 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
               : item.acceptanceCriteria;
             
             // Convert Markdown to HTML for AcceptanceCriteria
-            fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = marked(criteriaValue);
+            fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = marked(criteriaValue.toString());
           }
           
           // Add any additional fields
@@ -442,12 +432,6 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
             for (const [key, value] of Object.entries(item.additionalFields)) {
               // Skip empty values
               if (value === null || value === undefined || value === '') {
-                continue;
-              }
-              
-              // Skip System.AreaPath to avoid tree name errors
-              if (key === 'System.AreaPath') {
-                console.log('Ignoring explicitly set Area Path to avoid potential errors');
                 continue;
               }
               
@@ -471,7 +455,7 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
           // Update progress and completed items count
           completedItems++;
           setExactCompletedItems(prev => prev + 1);
-          const progress = Math.min(Math.round((completedItems / totalItems) * 100), 100);
+          const progress = Math.min(Math.round((completedItems / totalItemsCount) * 100), 100);
           setCreationProgress(progress);
           
           // Create children sequentially if they exist
@@ -517,12 +501,17 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
       };
       
       // Process each top-level work item one after another
-      for (const item of convertedWorkItems) {
+      for (const item of workItems) {
         const result = await createWorkItemHierarchy(item);
         createdResults.push(result);
       }
       
-      // Set isCreating to false to show the completed UI
+      // First hide the dialog
+      setShowCreationDialog(false);
+      
+      // Then update other states
+      setCreationComplete(true);
+      setCreatedWorkItems(createdResults);
       setIsCreating(false);
       
       // Show success message
@@ -532,26 +521,28 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         severity: 'success'
       });
       
-      // Log to console to say work items created
+      // Log to console
       console.log("[WorkItemForm] Work items created:", createdResults);
       
-      // Emit custom event to notify other parts of the application
+      // Emit custom event
       const workItemsCreatedEvent = new CustomEvent('workItemsCreated', {
         detail: {
           workItems: createdResults
         }
       });
       document.dispatchEvent(workItemsCreatedEvent);
-
-      // Close all dialogs
-      // setShowCreationDialog(false);
       
-      // Navigate to the top work item if available
+      // If there's a top-level work item, open it in a new tab
       if (createdResults.length > 0 && createdResults[0].url) {
         window.open(createdResults[0].url, '_blank');
       }
       
-      // Close the form
+      // Call onSubmit if provided
+      if (onSubmit) {
+        onSubmit(workItems);
+      }
+      
+      // Close the form immediately
       onClose();
       
     } catch (error) {
@@ -562,6 +553,11 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         message: `Failed to create work items: ${error instanceof Error ? error.message : 'Unknown error'}`,
         severity: 'error'
       });
+      
+      // Reset all states on error
+      setShowCreationDialog(false);
+      setIsCreating(false);
+      setCreationComplete(false);
     }
   };
 
@@ -609,19 +605,12 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
             variant="contained" 
             color="primary" 
             onClick={handleCreateWorkItems}
-            disabled={workItems.length === 0 || isCreating}
+            disabled={!workItems || workItems.length === 0 || isCreating}
           >
             {isCreating ? (
               <React.Fragment>
                 <CircularProgress size={16} color="inherit" sx={{ mr: 1 }} />
-                {`${exactCompletedItems} of ${(() => {
-                  const countItems = (items: any[]): number => {
-                    return items.reduce((count, item) => {
-                      return count + 1 + (item.children ? countItems(item.children) : 0);
-                    }, 0);
-                  };
-                  return countItems(workItems);
-                })()} - ${creationProgress}%`}
+                {`${exactCompletedItems} of ${workItems?.length || 0} - ${creationProgress}%`}
               </React.Fragment>
             ) : (
               T.createWorkItems
@@ -715,6 +704,17 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
         onRefineAgain={handleRefineAgain}
       />
       
+      <CreationDialog
+        open={showCreationDialog}
+        onClose={handleCloseCreationDialog}
+        isCreating={isCreating}
+        creationProgress={creationProgress}
+        currentItemBeingCreated={currentItemBeingCreated}
+        exactCompletedItems={exactCompletedItems}
+        totalItems={totalItems}
+        currentLanguage={currentLanguage}
+      />
+      
       <Snackbar
         open={notification.open}
         autoHideDuration={6000}
@@ -729,6 +729,53 @@ const WorkItemFormInner: React.FC<WorkItemFormProps> = ({
           {notification.message}
         </Alert>
       </Snackbar>
+      
+      {/* Action buttons after creation */}
+      {creationComplete && !isCreating && (
+        <Box sx={{ 
+          mt: 2,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 1,
+          alignItems: 'stretch'
+        }}>
+          <Button
+            variant="contained"
+            color="primary"
+            startIcon={<Launch />}
+            onClick={async () => {
+              try {
+                const orgProjectInfo = await getOrganizationAndProject();
+                if (orgProjectInfo.organizationName && orgProjectInfo.projectName) {
+                  window.open(
+                    `https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`,
+                    '_blank'
+                  );
+                }
+              } catch (error) {
+                console.error('Error getting organization and project info:', error);
+              }
+            }}
+          >
+            {currentLanguage === 'en' ? 'Go to Created Items' : 'Oluşturulan Öğelere Git'}
+          </Button>
+          
+          <Button
+            variant="outlined"
+            color="primary"
+            startIcon={<PlaylistAddCheck />}
+            onClick={() => {
+              console.log('[ChatMessages] Continue with Test Plan button clicked');
+              // Find the last message that might contain the plan
+              if (onContinueWithTestPlan) {
+                onContinueWithTestPlan();
+              }
+            }}
+          >
+            {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 };
