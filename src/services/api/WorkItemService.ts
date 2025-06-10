@@ -328,149 +328,105 @@ export class WorkItemService {
     client: WorkItemTrackingRestClient,
     parentId?: number
   ): Promise<WorkItemCreationResult> {
-    // Create the work item
-    const patchDocument: DevOpsPatchOperation[] = [
-      {
-        op: Operation.Add,
-        path: '/fields/System.Title',
-        value: workItem.title
-      },
-      {
-        op: Operation.Add,
-        path: '/fields/System.Description',
-        value: workItem.description ? marked(workItem.description) : ''
-      },
-      {
-        op: Operation.Add,
-        path: '/fields/System.TeamProject',
-        value: projectName
-      }
-    ];
-    
-    // Handle Acceptance Criteria - check both dedicated field and additionalFields
-    let acceptanceCriteriaValue = workItem.acceptanceCriteria;
+    try {
+      // Create main fields object with safe defaults
+      const fields: Record<string, any> = {
+        'System.Title': workItem.title,
+        'System.Description': workItem.description ? marked(workItem.description.toString()) : 'No description provided',
+        'Microsoft.VSTS.Common.Priority': 2, // Default priority
+        'System.AreaPath': teamContext && teamContext.name ? `${projectName}\\${teamContext.name}` : projectName
+      };
 
-    // Check if it's in additionalFields with various possible keys
-    if (!acceptanceCriteriaValue && workItem.additionalFields) {
-      // Find a matching key for acceptance criteria
-      const matchingKey = this.findMatchingKey(workItem.additionalFields, 'AcceptanceCriteria');
-      
-      if (matchingKey) {
-        console.log(`[WorkItemService] Found Acceptance Criteria in additionalFields with key: ${matchingKey}`);
-        acceptanceCriteriaValue = workItem.additionalFields[matchingKey];
+      // Add acceptance criteria if present
+      if (workItem.acceptanceCriteria) {
+        // Handle array of acceptance criteria
+        const criteriaValue = Array.isArray(workItem.acceptanceCriteria) 
+          ? workItem.acceptanceCriteria.join("\n") 
+          : workItem.acceptanceCriteria;
         
-        // Remove it from additionalFields to avoid duplication
-        delete workItem.additionalFields[matchingKey];
+        // Convert Markdown to HTML for AcceptanceCriteria
+        fields['Microsoft.VSTS.Common.AcceptanceCriteria'] = marked(criteriaValue.toString());
       }
-    }
-    
-    // If still no acceptance criteria and this is a user story, generate default
-    if (!acceptanceCriteriaValue) {
-      acceptanceCriteriaValue = this.generateDefaultAcceptanceCriteria(workItem);
-      if (acceptanceCriteriaValue) {
-        console.log(`[WorkItemService] Generated default acceptance criteria for User Story: ${workItem.title}`);
-      }
-    }
 
-    // Add Acceptance Criteria if we found a value
-    if (acceptanceCriteriaValue) {
-      patchDocument.push({
-        op: Operation.Add,
-        path: '/fields/Microsoft.VSTS.Common.AcceptanceCriteria',
-        value: marked(acceptanceCriteriaValue) // Convert Markdown to HTML for acceptance criteria
-      });
-      console.log(`[WorkItemService] Added acceptance criteria field with length ${acceptanceCriteriaValue.length}`);
-    }
-    
-    // Add additional fields
-    if (workItem.additionalFields) {
-      for (const [key, value] of Object.entries(workItem.additionalFields)) {
-        // Skip empty values
-        if (value === null || value === undefined || value === '') {
-          continue;
-        }
-        
-        // Map the field name to the proper Azure DevOps field reference name
-        const mappedKey = this.mapFieldName(key);
-        
-        // Add field with proper path - no need to add System. prefix if it's already properly mapped
-        patchDocument.push({
-          op: Operation.Add,
-          path: `/fields/${mappedKey}`,
-          value
-        });
-        
-        console.log(`[WorkItemService] Added field ${mappedKey} with value ${value}`);
-      }
-    }
-    
-    // Add team context
-    console.log(`[WorkItemService] Setting AreaPath with - Project: "${projectName}", Team: "${teamContext.name}", Full value: "${projectName}\\${teamContext.name}"`);
-    
-    // Ensure team context has a valid name before adding it to area path
-    const areaPath = teamContext && teamContext.name 
-      ? `${projectName}\\${teamContext.name}`
-      : projectName;
-      
-    patchDocument.push({
-      op: Operation.Add,
-      path: '/fields/System.AreaPath',
-      value: areaPath
-    });
-    
-    // Create the work item
-    const createdWorkItem = await client.createWorkItem(
-      patchDocument as JsonPatchDocument, 
-      projectName, 
-      workItem.type
-    );
-    
-    // If there's a parent, create the link
-    if (parentId) {
-      const linkPatchDocument: DevOpsPatchOperation[] = [
-        {
-          op: Operation.Add,
-          path: '/relations/-',
-          value: {
-            rel: 'System.LinkTypes.Hierarchy-Reverse',
-            url: `https://dev.azure.com/${projectName}/_apis/wit/workItems/${parentId}`
+      // Add any additional fields
+      if (workItem.additionalFields) {
+        for (const [key, value] of Object.entries(workItem.additionalFields)) {
+          // Skip empty values
+          if (value === null || value === undefined || value === '') {
+            continue;
+          }
+
+          // Handle numeric fields with parsing
+          if (key === 'Microsoft.VSTS.Scheduling.StoryPoints' || 
+              key === 'Microsoft.VSTS.Scheduling.Effort' ||
+              key === 'Microsoft.VSTS.Scheduling.RemainingWork' ||
+              key === 'Microsoft.VSTS.Scheduling.OriginalEstimate') {
+            fields[key] = parseFloat(value as string) || 0;
+          } else if (key === 'Microsoft.VSTS.Common.Priority') {
+            fields[key] = parseInt(value as string) || 2;
+          } else {
+            fields[key] = value;
           }
         }
-      ];
-      
-      // Add parent link
-      await client.updateWorkItem(
-        linkPatchDocument as JsonPatchDocument,
-        createdWorkItem.id as number,
-        projectName
-      );
-    }
-    
-    // Create result object
-    const result: WorkItemCreationResult = {
-      id: createdWorkItem.id as number,
-      title: workItem.title,
-      type: workItem.type,
-      url: createdWorkItem.url as string,
-      children: []
-    };
-    
-    // Create children if any
-    if (workItem.children && workItem.children.length > 0) {
-      for (const child of workItem.children) {
-        const childResult = await this.createWorkItemWithChildren(
-          child,
-          projectName,
-          teamContext,
-          client,
-          createdWorkItem.id as number
-        );
-        
-        result.children?.push(childResult);
       }
+
+      // Create the work item
+      const createdWorkItem = await client.createWorkItem(
+        fields as JsonPatchDocument, 
+        projectName, 
+        workItem.type
+      );
+      
+      // If there's a parent, create the link
+      if (parentId) {
+        const linkPatchDocument: DevOpsPatchOperation[] = [
+          {
+            op: Operation.Add,
+            path: '/relations/-',
+            value: {
+              rel: 'System.LinkTypes.Hierarchy-Reverse',
+              url: `https://dev.azure.com/${projectName}/_apis/wit/workItems/${parentId}`
+            }
+          }
+        ];
+        
+        // Add parent link
+        await client.updateWorkItem(
+          linkPatchDocument as JsonPatchDocument,
+          createdWorkItem.id as number,
+          projectName
+        );
+      }
+      
+      // Create result object
+      const result: WorkItemCreationResult = {
+        id: createdWorkItem.id as number,
+        title: workItem.title,
+        type: workItem.type,
+        url: createdWorkItem.url as string,
+        children: []
+      };
+      
+      // Create children if any
+      if (workItem.children && workItem.children.length > 0) {
+        for (const child of workItem.children) {
+          const childResult = await this.createWorkItemWithChildren(
+            child,
+            projectName,
+            teamContext,
+            client,
+            createdWorkItem.id as number
+          );
+          
+          result.children?.push(childResult);
+        }
+      }
+      
+      return result;
+    } catch (error) {
+      console.error(`[WorkItemService] Error in createWorkItemWithChildren:`, error);
+      throw error;
     }
-    
-    return result;
   }
 
   // Add the mapping function to the WorkItemService class

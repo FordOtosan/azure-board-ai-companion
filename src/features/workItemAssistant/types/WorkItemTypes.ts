@@ -39,6 +39,7 @@ export interface WorkItemFormProps {
   availableTypes: string[];
   teamMapping?: TeamWorkItemConfig | null;
   selectedTeam?: WebApiTeam | null;
+  onContinueWithTestPlan?: () => void;
 }
 
 // Additional interfaces

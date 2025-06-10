@@ -1,30 +1,30 @@
 import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
 import {
-  Alert,
-  Box,
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControlLabel,
-  IconButton,
-  InputAdornment,
-  Paper,
-  Radio,
-  RadioGroup,
-  Slider,
-  Snackbar,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  TextField,
-  Tooltip,
-  Typography
+    Alert,
+    Box,
+    Button,
+    Dialog,
+    DialogActions,
+    DialogContent,
+    DialogTitle,
+    FormControlLabel,
+    IconButton,
+    InputAdornment,
+    Paper,
+    Radio,
+    RadioGroup,
+    Slider,
+    Snackbar,
+    Table,
+    TableBody,
+    TableCell,
+    TableContainer,
+    TableHead,
+    TableRow,
+    TextField,
+    Tooltip,
+    Typography
 } from '@mui/material';
 import * as React from 'react';
 import { Language } from '../../../translations';
@@ -308,6 +308,33 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
     setSnackbar({ ...snackbar, open: false });
   };
 
+  const handleClearAllSettings = async () => {
+    if (!window.confirm('Are you sure you want to clear ALL LLM settings? This action cannot be undone.')) {
+      return;
+    }
+    
+    setSaving(true);
+    try {
+      await LlmSettingsService.clearSettings();
+      // Reload settings to see the cleared state
+      await loadSettings();
+      setSnackbar({
+        open: true,
+        message: 'All settings cleared successfully',
+        severity: 'success'
+      });
+    } catch (error) {
+      console.error('Error clearing settings:', error);
+      setSnackbar({
+        open: true,
+        message: 'Failed to clear settings',
+        severity: 'error'
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (loading) {
     return <Box p={3}>{T.loadingSettings}</Box>;
   }
@@ -500,8 +527,16 @@ export const LlmSettingsTab: React.FC<LlmSettingsTabProps> = ({ currentLanguage 
         </DialogActions>
       </Dialog>
 
-      {/* Save Button */}
-      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'flex-end' }}>
+      {/* Save and Clear Buttons */}
+      <Box sx={{ mt: 3, display: 'flex', justifyContent: 'space-between' }}>
+        <Button 
+          variant="outlined" 
+          color="error" 
+          onClick={handleClearAllSettings}
+          disabled={saving}
+        >
+          Clear All Settings (Test)
+        </Button>
         <Button 
           variant="contained" 
           color="primary" 

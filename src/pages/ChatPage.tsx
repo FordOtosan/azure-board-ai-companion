@@ -37,6 +37,7 @@ import { TestPlanForm } from '../features/testPlanAssistant';
 import { HighLevelPlanService } from '../services/api/HighLevelPlanService';
 import { ChatMessage, LlmApiService, StreamChunkCallback, StreamCompleteCallback, StreamErrorCallback } from '../services/api/LlmApiService'; // Import the new LLM API Service
 import { getTeamsInProject } from '../services/api/TeamService'; // Import the single, updated function
+import { WorkItemChunkingService } from '../services/api/WorkItemChunkingService';
 import { WorkItemCreationResult, WorkItemService } from '../services/api/WorkItemService';
 import { getOrganizationAndProject } from '../services/sdk/AzureDevOpsInfoService';
 import { AzureDevOpsSdkService } from '../services/sdk/AzureDevOpsSdkService';
@@ -73,10 +74,10 @@ const ChatPage: React.FC = () => {
   const [currentLanguage, setCurrentLanguage] = React.useState<Language>('en');
   const [messages, setMessages] = React.useState<Message[]>([]); // State for chat messages
   const [isLoadingResponse, setIsLoadingResponse] = React.useState(false); // For LLM loading state
-  const [streamingMessageId, setStreamingMessageId] = React.useState<string | number | null>(null); // Keep track of currently streaming message
+  const [streamingMessageId, setStreamingMessageId] = React.useState<number | null>(null); // Keep track of currently streaming message
   
   // Create a ref to store the streaming message ID to avoid race conditions
-  const streamingMessageIdRef = React.useRef<string | number | null>(null);
+  const streamingMessageIdRef = React.useRef<number | null>(null);
 
   // Theme for styling
   const theme = useTheme();
@@ -340,6 +341,13 @@ const ChatPage: React.FC = () => {
       document.removeEventListener('testPlanCreated', handleTestPlanCreated);
     };
   }, []);
+
+  // Update workItemSysPrompt when llmSettings changes
+  React.useEffect(() => {
+    if (llmSettings) {
+      setWorkItemSysPrompt(llmSettings.createWorkItemPlanSystemPrompt || '');
+    }
+  }, [llmSettings]);
 
   // --- Handlers ---
   const handleTeamSelect = (team: WebApiTeam) => {
@@ -749,7 +757,9 @@ const ChatPage: React.FC = () => {
         prompt, 
         undefined, 
         updatedHistory,
-        teamWorkItemMapping || teamMapping // Use the mapping with hierarchies if available, fall back to teamMapping
+        teamWorkItemMapping || teamMapping, // Use the mapping with hierarchies if available, fall back to teamMapping
+        currentLanguage,
+        workItemSysPrompt // Pass the system prompt from settings
       );
       handleStreamComplete(response);
       setCanStopGeneration(false);
@@ -757,8 +767,59 @@ const ChatPage: React.FC = () => {
       // Add assistant response to history
       setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
     } catch (error) {
-      handleStreamError(error as Error);
+      handleStreamError(error instanceof Error ? error : new Error(String(error)));
       setCanStopGeneration(false);
+    }
+  };
+
+  // Helper function to send high-level plan as a new message instead of updating an existing one
+  const sendHighLevelPlanAsNewMessage = async (prompt: string) => {
+    if (!prompt.trim() || !llmSettings || !currentLlm) return;
+    
+    // Create new AbortController for this request
+    abortControllerRef.current = new AbortController();
+
+    try {
+      // Add user message to LLM history but don't show it in the UI
+      const newUserMessage: ChatMessage = { 
+        role: 'user', 
+        content: prompt
+      };
+      const updatedHistory = [...llmHistory, newUserMessage];
+      
+      // Update the history state immediately to include this message
+      setLlmHistory(updatedHistory);
+      
+      // Generate the plan with team configuration for work item types
+      const response = await HighLevelPlanService.generateHighLevelPlan(
+        currentLlm, 
+        prompt, 
+        undefined, 
+        updatedHistory,
+        teamWorkItemMapping || teamMapping, // Use the mapping with hierarchies if available, fall back to teamMapping
+        currentLanguage,
+        workItemSysPrompt // Pass the system prompt from settings
+      );
+      
+      // Create a new message for the plan
+      const planMessage: Message = {
+        id: Date.now(),
+        role: 'assistant',
+        content: response
+      };
+      
+      // Add the plan message to the chat
+      setMessages(prev => [...prev, planMessage]);
+      
+      // Add assistant response to history
+      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
+    } catch (error) {
+      const errorMessage: Message = {
+        id: Date.now(),
+        role: 'assistant',
+        content: `⚠️ Error generating plan: ${error instanceof Error ? error.message : String(error)}`
+      };
+      setMessages(prev => [...prev, errorMessage]);
     }
   };
 
@@ -826,55 +887,6 @@ const ChatPage: React.FC = () => {
     })();
   };
   
-  // Helper function to send high-level plan as a new message instead of updating an existing one
-  const sendHighLevelPlanAsNewMessage = async (prompt: string) => {
-    if (!prompt.trim() || !llmSettings || !currentLlm) return;
-    
-    // Create new AbortController for this request
-    abortControllerRef.current = new AbortController();
-
-    try {
-      // Add user message to LLM history but don't show it in the UI
-      const newUserMessage: ChatMessage = { 
-        role: 'user', 
-        content: prompt
-      };
-      const updatedHistory = [...llmHistory, newUserMessage];
-      
-      // Update the history state immediately to include this message
-      setLlmHistory(updatedHistory);
-      
-      // Generate the plan with team configuration for work item types
-      const response = await HighLevelPlanService.generateHighLevelPlan(
-        currentLlm, 
-        prompt, 
-        undefined, 
-        updatedHistory,
-        teamWorkItemMapping || teamMapping // Use the mapping with hierarchies if available, fall back to teamMapping
-      );
-      
-      // Create a new message for the plan
-      const planMessage: Message = {
-        id: Date.now(),
-        role: 'assistant',
-        content: response
-      };
-      
-      // Add the plan message to the chat
-      setMessages(prev => [...prev, planMessage]);
-      
-      // Add assistant response to history
-      setLlmHistory(prev => [...prev, { role: 'assistant', content: response }]);
-    } catch (error) {
-      const errorMessage: Message = {
-        id: Date.now(),
-        role: 'assistant',
-        content: `⚠️ Error generating plan: ${error instanceof Error ? error.message : 'Unknown error'}`
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    }
-  };
-
   // Add a helper function for showing notifications
   const showNotification = (message: string, severity: 'success' | 'info' | 'warning' | 'error' = 'info') => {
     setNotification({
@@ -1326,85 +1338,7 @@ ${messageContent}
             </Fade>
           )}
           
-          {/* Global loading overlay for work item creation */}
-          {isCreatingWorkItems && (
-            <Fade in={true}>
-              <Box
-                sx={{
-                  position: 'fixed',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundColor: alpha(theme.palette.background.paper, 0.7),
-                  backdropFilter: 'blur(5px)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  zIndex: 1400,
-                }}
-              >
-                <Paper
-                  elevation={3}
-                  sx={{
-                    backgroundColor: theme.palette.background.paper,
-                    borderRadius: 2,
-                    p: 4,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    gap: 2,
-                    boxShadow: theme.shadows[10],
-                    maxWidth: '90%',
-                    width: 400,
-                    textAlign: 'center',
-                    animation: 'pulse 2s infinite ease-in-out',
-                    '@keyframes pulse': {
-                      '0%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0.4)}` },
-                      '70%': { boxShadow: `0 0 0 15px ${alpha(theme.palette.primary.main, 0)}` },
-                      '100%': { boxShadow: `0 0 0 0 ${alpha(theme.palette.primary.main, 0)}` }
-                    }
-                  }}
-                >
-                  <Box
-                    sx={{
-                      position: 'relative',
-                      display: 'flex',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      m: 1
-                    }}
-                  >
-                    <CircularProgress 
-                      size={70} 
-                      thickness={3} 
-                      sx={{ 
-                        color: theme.palette.primary.main
-                      }} 
-                    />
-                    <NoteAdd
-                      sx={{
-                        position: 'absolute',
-                        fontSize: 30,
-                        color: theme.palette.primary.main
-                      }}
-                    />
-                  </Box>
-                  <Typography variant="h6" sx={{ fontWeight: 500, mt: 2 }}>
-                    {currentLanguage === 'en' 
-                      ? 'Creating work items...'
-                      : 'İş öğeleri oluşturuluyor...'}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {currentLanguage === 'en'
-                      ? 'Saving work items to Azure DevOps and establishing relationships'
-                      : 'İş öğeleri Azure DevOps\'a kaydediliyor ve ilişkiler kuruluyor'}
-                  </Typography>
-                </Paper>
-              </Box>
-            </Fade>
-          )}
+
 
           {/* General Error Display */}
           {error && (
@@ -1457,125 +1391,11 @@ ${messageContent}
                     
                     // First check if this is a test plan
                     if (messageContent.includes('##HIGHLEVELTESTPLAN##')) {
-                      console.log('[ChatPage] Detected test plan content');
-                      
-                      // If current LLM is not available, just show the form with raw content
-                      if (!currentLlm) {
-                        setTestPlanContent(messageContent);
-                        setIsTestPlanFormOpen(true);
-                        return;
-                      }
-                      
-                      // Otherwise, generate the JSON test plan structure for better parsing
-                      setIsLoadingResponse(true);
-                      setCanStopGeneration(true);
-                      
-                      // Create new AbortController for this request
-                      abortControllerRef.current = new AbortController();
-                      
-                      console.log('[ChatPage] Generating JSON test plan from high level test plan');
-                      
-                      // Create a prompt for structured JSON test plan generation
-                      const jsonTestPlanPrompt = `
-You are a test plan structuring assistant. Convert the following high-level test plan into a JSON structure.
-
-INPUT TEST PLAN:
-${messageContent}
-
-OUTPUT FORMAT:
-Your response must be ONLY a valid JSON object with this structure:
-{
-  "testPlan": {
-    "name": "string", // The name of the test plan
-    "testSuites": [
-      {
-        "name": "string", // The name of a test suite
-        "testCases": [
-          {
-            "name": "string", // The name of a test case
-            "description": "string", // A detailed description of what this test case verifies
-            "steps": [
-              {
-                "action": "string", // Specific action the tester should take
-                "expectedResult": "string" // The expected outcome of the action
-              }
-            ]
-          }
-        ]
-      }
-    ]
-  }
-}
-
-CRITICAL REQUIREMENTS:
-1. EVERY "testSuites" array MUST contain at least one test suite
-2. EVERY test suite MUST have a "testCases" array, even if empty
-3. EVERY test case MUST include at least 3-5 detailed steps with clear actions and expected results
-4. DO NOT omit the "testCases" property from any suite, even if empty use: "testCases": []
-5. DO NOT omit the "steps" property from any test case, even if empty use: "steps": []
-6. STRICT JSON structure must be followed - no additional or missing properties
-7. Each field must be enclosed in double quotes and conform to JSON syntax
-8. Steps should be specific and actionable (e.g., "Click the Submit button" rather than "Submit the form")
-9. Expected results should clearly state what the tester should observe (e.g., "User is redirected to the dashboard page")
-10. Test case descriptions should explain what functionality is being tested and why
-11. Use realistic test data examples when appropriate
-
-Your response must be VALID JSON and NOTHING ELSE - no explanations, no text outside the JSON object.
-
-If any part of the test plan is unclear, make a reasonable interpretation rather than omitting the JSON structure.`;
-                      
-                      // Process silently in the background, don't add to chat
-                      showNotification('Preparing test plan...', 'info');
-                      
-                      try {
-                        // Add user message to LLM history (but don't display in chat)
-                        const newUserMessage: ChatMessage = { 
-                          role: 'user', 
-                          content: jsonTestPlanPrompt
-                        };
-                        const updatedHistory = [...llmHistory, newUserMessage];
-                        
-                        // Update the history state
-                        setLlmHistory(updatedHistory);
-                        
-                        // Send the prompt to the LLM API
-                        LlmApiService.sendPromptToLlm(currentLlm, jsonTestPlanPrompt, updatedHistory)
-                          .then((fullResponse) => {
-                            setCanStopGeneration(false);
-                            setIsLoadingResponse(false);
-                            
-                            // Add assistant response to history
-                            setLlmHistory(prev => [...prev, { role: 'assistant', content: fullResponse }]);
-                            
-                            // Set the JSON response as the test plan content
-                            setTestPlanContent(fullResponse);
-                            
-                            // Open the test plan form modal
-                            setIsTestPlanFormOpen(true);
-                          })
-                          .catch((error) => {
-                            console.error('Error generating JSON test plan:', error);
-                            setCanStopGeneration(false);
-                            setIsLoadingResponse(false);
-                            
-                            // Fallback to using the original test plan format
-                            setTestPlanContent(messageContent);
-                            setIsTestPlanFormOpen(true);
-                          });
-                      } catch (error) {
-                        console.error('Error generating JSON test plan:', error);
-                        setCanStopGeneration(false);
-                        setIsLoadingResponse(false);
-                        
-                        // Fallback to using the original test plan format
-                        setTestPlanContent(messageContent);
-                        setIsTestPlanFormOpen(true);
-                      }
-                      
+                      handleContinueWithTestPlan(msg);
                       return;
                     }
                     
-                    // If not a test plan, check if it's a work item JSON plan
+                    // Check if it's a work item JSON plan
                     const isJsonPlan = (() => {
                       try {
                         // Check if it has a code block with JSON
@@ -1597,19 +1417,6 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                       }
                     })();
                     
-                    // Before opening form, make sure no navigation buttons exist
-                    // Remove any existing navigation buttons related to work items or test plans
-                    setMessages(prev => 
-                      prev.filter(msg => 
-                        !(msg.navigationButtons && 
-                          msg.navigationButtons.some(btn => 
-                            btn.action === 'showWorkItems' || 
-                            btn.action === 'continueWithTestPlan'
-                          )
-                        )
-                      )
-                    );
-                    
                     if (isJsonPlan) {
                       // If it's already a JSON plan, directly open the form with that content
                       setJsonPlan(messageContent);
@@ -1626,11 +1433,11 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                     const planContent = messageContent;
                     console.log('[ChatPage] High-level plan content:');
                     console.log(planContent);
-                    
+
                     // Gather field information for the prompt
                     const fieldInformation = teamMapping?.workItemTypes
-                      .filter(t => t.enabled)
-                      .map(t => {
+                      ?.filter(t => t.enabled)
+                      ?.map(t => {
                         const requiredFields = t.fields
                           .filter(f => f.enabled && f.required)
                           .map(f => f.displayName || f.name);
@@ -1652,7 +1459,7 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                               examples: getFieldExamples(f.name, t.name)
                             }))
                         };
-                      });
+                      }) || [];
                       
                     console.log('[ChatPage] Field information for JSON prompt:');
                     console.log(JSON.stringify(fieldInformation, null, 2));
@@ -1688,6 +1495,71 @@ If any part of the test plan is unclear, make a reasonable interpretation rather
                       return ["Sample value for " + fieldName];
                     }
 
+                    // Check if this is a large plan that needs chunking
+                    const cleanContent = planContent.replace('##HIGHLEVELPLAN##', '').trim();
+                    const isLargePlan = cleanContent.split('\n').length > 10;
+                    
+                    if (isLargePlan && currentLlm) {
+                      console.log('[ChatPage] Large plan detected, using chunking strategy');
+                      
+                      try {
+                        // Split the plan into chunks
+                        const chunks = WorkItemChunkingService.chunkHighLevelPlan(planContent);
+                        
+                        // Process the chunks with progress updates
+                        WorkItemChunkingService.processChunks(
+                          chunks,
+                          currentLlm,
+                          teamWorkItemMapping || teamMapping,
+                          currentLanguage,
+                          (progress) => {
+                            // Update progress notification
+                            showNotification(`Converting plan to JSON (${Math.round(progress)}%)`, 'info');
+                          }
+                        )
+                        .then((jsonPlan) => {
+                          // Create a new message for the JSON plan
+                          const jsonPlanMessage: Message = {
+                            id: Date.now(),
+                            role: 'assistant',
+                            content: jsonPlan,
+                            navigationButtons: workItemsCreated ? [
+                              {
+                                label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
+                                action: 'showWorkItems'
+                              },
+                              {
+                                label: currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et',
+                                action: 'continueWithTestPlan'
+                              }
+                            ] : undefined
+                          };
+
+                          // Add the JSON plan message to chat
+                          setMessages(prev => [...prev, jsonPlanMessage]);
+
+                          setJsonPlan(jsonPlan);
+                          setIsWorkItemFormOpen(true);
+                          setIsLoadingResponse(false);
+                          setCanStopGeneration(false);
+                          showNotification('Plan converted successfully', 'success');
+                        })
+                        .catch((error) => {
+                          console.error('[ChatPage] Error processing chunked plan:', error);
+                          setIsLoadingResponse(false);
+                          setCanStopGeneration(false);
+                          showNotification('Error converting plan to JSON', 'error');
+                        });
+                      } catch (error) {
+                        console.error('[ChatPage] Error chunking plan:', error);
+                        setIsLoadingResponse(false);
+                        setCanStopGeneration(false);
+                        showNotification('Error processing large plan', 'error');
+                      }
+                      return;
+                    }
+                    
+                    // For smaller plans or when no LLM is available, use the original approach
                     // Create the prompt for detailed JSON plan
                     const jsonPrompt = `
 # Convert High-Level Plan to Azure DevOps Work Items
@@ -2395,7 +2267,10 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                       // Remove any existing navigation button messages
                       const filteredMessages = messages.filter(msg => 
                         !(msg.navigationButtons && 
-                          msg.navigationButtons.some(btn => btn.action === 'showWorkItems'))
+                          msg.navigationButtons.some(btn => 
+                            btn.action === 'showWorkItems' || 
+                            btn.action === 'continueWithTestPlan'
+                          ))
                       );
                       
                       // Remove JSON plan messages - they'll be recreated with workItemsCreated=true
@@ -2420,6 +2295,16 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                           const recreatedJsonPlans = jsonPlanMessages.map(msg => ({
                             ...msg,
                             id: Date.now() + Math.random(), // Force a new ID
+                            navigationButtons: [
+                              {
+                                label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
+                                action: 'showWorkItems'
+                              },
+                              {
+                                label: currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et',
+                                action: 'continueWithTestPlan'
+                              }
+                            ]
                           }));
                           
                           setMessages(prev => [...prev, ...recreatedJsonPlans]);
@@ -2435,6 +2320,10 @@ Return ONLY the fixed JSON with no explanations, comments or backticks.`;
                               label: currentLanguage === 'en' ? 'Show Work Items' : 'İş Öğelerini Göster',
                               action: 'showWorkItems',
                               icon: 'list' // Use a list icon for better visibility
+                            },
+                            {
+                              label: currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et',
+                              action: 'continueWithTestPlan'
                             }
                           ]
                         };

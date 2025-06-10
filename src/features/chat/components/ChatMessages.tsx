@@ -4,6 +4,7 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import { Box, Button, IconButton, Tooltip } from '@mui/material'; // Add Typography component
 import * as React from 'react';
 import { getOrganizationAndProject } from '../../../services/sdk/AzureDevOpsInfoService';
+import { cleanupCreationDialog } from '../../../utils/dialogCleanup';
 
 // Import the shared Language type and translations structure
 import { Language, translations } from '../../../translations';
@@ -65,9 +66,6 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
   // Translation shorthand
   const T = componentTranslations[currentLanguage];
 
-  // State to track if work items have been created
-  const [localWorkItemsCreated, setLocalWorkItemsCreated] = React.useState(workItemsCreated);
-
   // Scroll to bottom when messages change
   React.useEffect(() => {
     scrollToBottom();
@@ -81,27 +79,6 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
 
     return () => clearInterval(interval);
   }, []);
-
-  // Listen for work items created event
-  React.useEffect(() => {
-    const handleWorkItemsCreated = () => {
-      console.log("[ChatMessages] Detected work items created event");
-      setLocalWorkItemsCreated(true);
-    };
-    
-    // Add event listener
-    document.addEventListener('workItemsCreated', handleWorkItemsCreated);
-    
-    // Cleanup
-    return () => {
-      document.removeEventListener('workItemsCreated', handleWorkItemsCreated);
-    };
-  }, []);
-  
-  // Update local state if prop changes
-  React.useEffect(() => {
-    setLocalWorkItemsCreated(workItemsCreated);
-  }, [workItemsCreated]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -231,6 +208,73 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
     );
   };
 
+  // Function to render action buttons after work items are created
+  const renderWorkItemActionButtons = () => {
+    if (!workItemsCreated) return null;
+
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        gap: 1,
+        mt: 2,
+        alignItems: 'stretch'
+      }}>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<Launch />}
+          onClick={async () => {
+            try {
+              const orgProjectInfo = await getOrganizationAndProject();
+              if (orgProjectInfo.organizationName && orgProjectInfo.projectName) {
+                window.open(
+                  `https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`,
+                  '_blank'
+                );
+              }
+            } catch (error) {
+              console.error('Error getting organization and project info:', error);
+            }
+          }}
+        >
+          {currentLanguage === 'en' ? 'Go to Created Items' : 'Oluşturulan Öğelere Git'}
+        </Button>
+        
+        <Button
+          variant="outlined"
+          color="primary"
+          startIcon={<PlaylistAddCheck />}
+          onClick={() => {
+            console.log('[ChatMessages] Continue with Test Plan button clicked');
+            // Find the last message that might contain the plan
+            const lastMessage = messages[messages.length - 1];
+            if (lastMessage && onContinueWithTestPlan) {
+              onContinueWithTestPlan(lastMessage);
+            }
+          }}
+        >
+          {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
+        </Button>
+      </Box>
+    );
+  };
+
+  // Add cleanup flag ref
+  const cleanupExecuted = React.useRef(false);
+
+  // Effect to cleanup dialog when work items are created
+  React.useEffect(() => {
+    if (workItemsCreated) {
+      // Wait for any animations to complete
+      const timeoutId = setTimeout(() => {
+        cleanupCreationDialog();
+      }, 500); // Increased timeout to ensure animations complete
+
+      return () => clearTimeout(timeoutId);
+    }
+  }, [workItemsCreated]);
+
   return (
     <Box sx={{ 
       flexGrow: 1, 
@@ -290,9 +334,7 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                      onUsePlan={() => onUsePlan?.(msg)}
                      planType={hasHighLevelTestPlan ? 'test' : 'regular'}
                    />
-                 ) : hasJsonPlan && !isStreaming && localWorkItemsCreated ? (
-                   // Only show these buttons if hasJsonPlan AND workItemsCreated is true
-                   // Display a button instead of the JSON content - only for non-streaming JSON plans
+                 ) : hasJsonPlan && !isStreaming ? (
                    <Box sx={{ 
                      p: 2, 
                      backgroundColor: 'background.paper', 
@@ -304,64 +346,53 @@ export const ChatMessages: React.FC<ChatMessagesProps> = ({ messages, currentLan
                      alignItems: 'center',
                      gap: 2
                    }}>
-                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexDirection: 'column' }}>
+                     {workItemsCreated ? (
+                       <>
+                         <Button
+                           variant="contained"
+                           color="primary"
+                           startIcon={<Launch />}
+                           onClick={async () => {
+                             try {
+                               const orgProjectInfo = await getOrganizationAndProject();
+                               if (orgProjectInfo.organizationName && orgProjectInfo.projectName) {
+                                 window.open(
+                                   `https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`,
+                                   '_blank'
+                                 );
+                               }
+                             } catch (error) {
+                               console.error('Error getting organization and project info:', error);
+                             }
+                           }}
+                           sx={{ width: '100%' }}
+                         >
+                           {currentLanguage === 'en' ? 'Go to Created Items' : 'Oluşturulan Öğelere Git'}
+                         </Button>
+                         <Button
+                           variant="outlined"
+                           color="primary"
+                           startIcon={<PlaylistAddCheck />}
+                           onClick={() => {
+                             if (onContinueWithTestPlan) {
+                               onContinueWithTestPlan(msg);
+                             }
+                           }}
+                           sx={{ width: '100%' }}
+                         >
+                           {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
+                         </Button>
+                       </>
+                     ) : (
                        <Button
                          variant="contained"
                          color="primary"
-                         startIcon={<Launch />}
-                         onClick={async () => {
-                           try {
-                             // Get organization and project info
-                             const orgProjectInfo = await getOrganizationAndProject();
-                             if (orgProjectInfo.organizationName && orgProjectInfo.projectName) {
-                               // Open the recently created work items URL in a new tab
-                               window.open(`https://dev.azure.com/${orgProjectInfo.organizationName}/${orgProjectInfo.projectName}/_workitems/recentlycreated/`, '_blank');
-                             } else {
-                               console.error('Organization or project name not available');
-                             }
-                           } catch (error) {
-                             console.error('Error getting organization and project info:', error);
-                           }
-                         }}
-                         sx={{ mb: 1, width: '100%' }}
-                       >
-                         {currentLanguage === 'en' ? 'Go to Created Items' : 'Oluşturulan Öğelere Git'}
-                       </Button>
-                       <Button
-                         variant="outlined"
-                         color="primary"
-                         startIcon={<PlaylistAddCheck />}
-                         onClick={() => {
-                           console.log('[ChatMessages] Continue with Test Plan button clicked');
-                           onContinueWithTestPlan ? onContinueWithTestPlan(msg) : console.log('Continue with test plan - to be implemented');
-                         }}
+                         onClick={() => onUsePlan?.(msg)}
                          sx={{ width: '100%' }}
                        >
-                         {currentLanguage === 'en' ? 'Continue with Test Plan' : 'Test Planı ile Devam Et'}
+                         {currentLanguage === 'en' ? 'Show Work Items Form' : 'İş Öğeleri Formunu Görüntüle'}
                        </Button>
-                     </Box>
-                   </Box>
-                 ) : hasJsonPlan && !isStreaming ? (
-                   // Show the JSON plan but with a "use plan" button for creating work items when items haven't been created yet
-                   <Box sx={{ 
-                     p: 2, 
-                     backgroundColor: 'background.paper', 
-                     borderRadius: 2,
-                     border: '1px solid',
-                     borderColor: 'divider',
-                     display: 'flex',
-                     flexDirection: 'column',
-                     alignItems: 'center',
-                     gap: 2
-                   }}>
-                     <Button
-                       variant="contained"
-                       color="primary"
-                       onClick={() => onUsePlan?.(msg)}
-                       sx={{ width: '100%' }}
-                     >
-                       {currentLanguage === 'en' ? 'Show Work Items Form' : 'İş Öğeleri Formunu Görüntüle'}
-                     </Button>
+                     )}
                    </Box>
                  ) : msg.content === '' && msg.navigationButtons ? (
                    // Render navigation buttons for empty content messages with navigationButtons
